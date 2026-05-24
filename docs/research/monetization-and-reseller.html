@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monetization &amp; Reseller Legality — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html">Places</a>
+  <a href="monetization-and-reseller.html" class="active">Monetization</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Monetization &amp; Reseller Legality</h1>
+  <p class="subtitle">Four ways to make money selling flights, trains, and attractions worldwide &mdash; from zero-overhead affiliate to bonded OTA &mdash; with the regulatory cost of each.</p>
+
+  <h2>The three regulatory layers</h2>
+  <p>Every monetization model has to clear three layers, in rough order of difficulty:</p>
+  <ol>
+    <li><strong>Accreditation / appointment</strong> &mdash; who's allowed to sell which inventory. Airlines (IATA / ARC) are the strictest; trains vary by operator; attractions are mostly open marketplaces.</li>
+    <li><strong>Payments &amp; consumer protection</strong> &mdash; who's liable if a flight cancels or you go bust. EU Package Travel Directive, UK ATOL, US Seller-of-Travel laws, refund rules.</li>
+    <li><strong>Marketing &amp; pricing</strong> &mdash; full-fare disclosure (DOT Part 399 in the US, EU 1008/2008), drip-pricing bans, mandatory ancillary disclosures.</li>
+  </ol>
+  <p>The first two are where startups stall. The third is what gets you fined later if you ignore it.</p>
+
+  <h2>Model 1 &mdash; Affiliate / deep-link</h2>
+  <p>You book nothing. The user clicks through your product to a partner's checkout. The partner pays you a commission. In legal terms you're a publisher, not a seller of travel.</p>
+
+  <h3>Upside</h3>
+  <ul>
+    <li>Lightest legal posture by an order of magnitude. No accreditation, no bonding, no payment processing, no refund liability.</li>
+    <li>Launch in days. Most partners self-serve onboarding.</li>
+    <li>Globally portable &mdash; same model works US / EU / APAC.</li>
+  </ul>
+
+  <h3>Downside</h3>
+  <ul>
+    <li>Commissions are low and shrinking. Air affiliate is typically <strong>1&ndash;4%</strong>; rail varies <strong>3&ndash;7%</strong> (Trainline) / <strong>5&ndash;8%</strong> (Rail Europe); attractions are best at <strong>6&ndash;10%</strong>.</li>
+    <li>You don't own the booking flow &mdash; the partner's UX changes flow straight through to your conversion.</li>
+    <li>Attribution attrition: users abandon at the partner site; you only earn on completed bookings, with 7&ndash;30 day cookie windows.</li>
+    <li>A subscription overlay is awkward &mdash; you can't promise discounted bookings you don't control.</li>
+  </ul>
+
+  <h3>Partners (concrete list)</h3>
+  <table>
+    <thead>
+      <tr><th>Inventory</th><th>Partners</th><th>Posture</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Air</td><td>Duffel ($5 / booking + commission), Kiwi.com Tequila, Travelpayouts (aggregates 80+ travel partners), Skyscanner Travel API</td><td>Direct API or affiliate network</td></tr>
+      <tr><td>Rail</td><td>Trainline Partner Solutions, Rail Europe Agents, Omio (via Travelpayouts), Amtrak affiliate (limited)</td><td>Approval per program</td></tr>
+      <tr><td>Attractions</td><td>Viator (via Awin), GetYourGuide (via Partnerize), Tiqets, Klook, Headout</td><td>Self-serve sign-up + commission</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Important details</h3>
+  <ul>
+    <li><strong>FTC disclosure</strong> required in the US &mdash; "we may earn commission" must be visible.</li>
+    <li><strong>EU GDPR + ePrivacy</strong> &mdash; affiliate tracking cookies need consent banners.</li>
+    <li><strong>App stores:</strong> in-app links to affiliate URLs are fine. In-app <em>purchases</em> of physical / travel goods are excluded from the 30% commission &mdash; matters more for Model 2.</li>
+  </ul>
+
+  <h2>Model 2 &mdash; Full reseller / OTA</h2>
+  <p>You take payment, you issue tickets, you eat refund liability. Booking.com, Expedia, Kiwi.com (since their pivot) all run this.</p>
+
+  <h3>Upside</h3>
+  <ul>
+    <li>End-to-end customer relationship &mdash; re-marketing, ancillary upsell, loyalty programs all yours.</li>
+    <li>Higher per-unit margin: markup + IATA commission + ancillary attach (bags, seats, insurance &mdash; often higher margin than the ticket itself).</li>
+    <li>You can charge your own service fees on top (Model 4 variant B).</li>
+  </ul>
+
+  <h3>Downside</h3>
+  <ul>
+    <li>Accreditation is a real project &mdash; most startups stall here.</li>
+    <li>Bonding / insurance ties up working capital permanently.</li>
+    <li>Refund liability: when the airline drags on a refund, you're on the hook. Norwegian, Wow Air, Thomas Cook all left OTAs with massive refund holes.</li>
+    <li>Payment processing risk: chargebacks for cancelled flights run <strong>3&ndash;8% of GMV</strong>. Stripe / Adyen require sizable reserves.</li>
+  </ul>
+
+  <h3>Accreditation by region</h3>
+  <table>
+    <thead>
+      <tr><th>Region</th><th>Path</th><th>Time</th><th>Upfront cash</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>US air</strong></td><td>IATA IATAN (international) + ARC (US domestic)</td><td>6&ndash;12 mo</td><td>~$2k apps + <strong>$20&ndash;50k bond</strong> + $1&ndash;2M E&amp;O insurance</td></tr>
+      <tr><td><strong>US air (lite)</strong></td><td>IATA TIDS only &mdash; you're an intermediary, a host agency handles ticketing</td><td>1&ndash;2 mo</td><td>~$300 / yr; host agency takes 20&ndash;30% of commission</td></tr>
+      <tr><td><strong>US state laws</strong></td><td>CA, FL, WA, IL, HI, NV require Seller-of-Travel registration</td><td>1&ndash;3 mo</td><td>CA: $100 + <strong>$50k bond</strong> (or trust account); FL: $50 + $25k bond</td></tr>
+      <tr><td><strong>UK</strong></td><td>ATOL (CAA) for any package containing a flight</td><td>3&ndash;6 mo</td><td>&pound;2k application + <strong>&pound;2.50 APC / passenger</strong> + audited accounts</td></tr>
+      <tr><td><strong>EU</strong></td><td>No EU-wide regime; per-country agent licenses + Package Travel Directive bonding via insurer</td><td>Varies</td><td>DE: IHK travel license; FR: Atout France (&euro;100 + bond); ES: per-region</td></tr>
+      <tr><td><strong>Japan</strong></td><td>Travel Agency Law Type 1 / 2 / 3 (Type 1 covers overseas)</td><td>3&ndash;9 mo</td><td>Type 1: ~&yen;30M bond</td></tr>
+      <tr><td><strong>Australia</strong></td><td>ATAS voluntary scheme + ACCC consumer law</td><td>Weeks</td><td>Low; reputational</td></tr>
+      <tr><td><strong>Singapore</strong></td><td>TIO license under Travel Agents Act</td><td>2&ndash;4 mo</td><td>License + bond</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Rail and attraction reselling</strong> are dramatically lighter than air. Rail operators (Trainline, SNCF, DB, Eurostar, Amtrak) offer B2B partner / distributor agreements with no public accreditation regime &mdash; expect revenue share plus minimum-volume commitments. Attractions marketplaces (Viator, GetYourGuide, Tiqets, Klook) let you sell with no accreditation but require you to handle payment and refunds yourself; some require their checkout (collapsing back to Model 1).</p>
+
+  <h3>Important details</h3>
+  <ul>
+    <li><strong>EU Package Travel Directive (2018).</strong> The moment you bundle two travel components for the same trip (flight + hotel, flight + train, flight + tour), you become a <em>package organiser</em> with strict liability and mandatory insolvency insurance. Multi-stop trip planning sits right on this line &mdash; see <a href="places-and-poi.html">Places &amp; POI</a>.</li>
+    <li><strong>DOT Part 399 ("full-fare advertising").</strong> US: taxes and mandatory fees must be in the headline price. Optional ancillaries can be drip-priced but must be disclosed before payment. See <a href="cost-transparency.html">Cost Transparency</a> &mdash; the existing fee breakdown is already compliant.</li>
+    <li><strong>DOT 24-hour refund rule.</strong> US flights sold by anyone must be refundable within 24 hours of booking. No exceptions.</li>
+    <li><strong>Mistake fares / hidden-city / throwaway ticketing.</strong> Airline contracts of carriage forbid these. Resellers who facilitate them have been sued &mdash; <em>United v. Skiplagged</em> is the leading US precedent.</li>
+    <li><strong>EU PSD2 SCA</strong> drives heavy Strong Customer Authentication friction on EU cards &mdash; build in Adyen / Stripe Radar from day one.</li>
+  </ul>
+
+  <h2>Model 3 &mdash; Subscription discount club</h2>
+  <p>Users pay you a recurring fee for <em>access to</em> curated deals, alerts, and tools. You're not selling tickets &mdash; you're selling information. Users book themselves, often via your affiliate links. Going (formerly Scott's Cheap Flights), Dollar Flight Club, Pomelo, Jack's Flight Club, Travelzoo all run this template.</p>
+
+  <h3>Upside</h3>
+  <ul>
+    <li><strong>Best margins of any model.</strong> Subscription is high-margin SaaS economics applied to travel. Going was acquired by Hopper's parent in 2024 at a reported 9-figure valuation.</li>
+    <li><strong>No accreditation needed in any jurisdiction</strong> &mdash; you're a publisher selling subscriptions, not a travel seller.</li>
+    <li>Stripe Subscriptions covers payments &mdash; no travel-specific PSP needed.</li>
+    <li>Compatible with affiliate stacking &mdash; subscribers click your links and you double-dip.</li>
+  </ul>
+
+  <h3>Downside</h3>
+  <ul>
+    <li>The "discount" is <strong>curation + speed</strong>, not negotiated rates. You can't offer subscribers a lower price than Google Flights &mdash; you find deals they wouldn't have searched for, faster.</li>
+    <li>Content treadmill: a steady drumbeat of genuinely good deals, or churn explodes. Going employs ~25 flight experts full-time.</li>
+    <li>Mistake-fare risk: airlines can (and do) cancel error-fare bookings. Going moved away from leaning on these for exactly this reason.</li>
+    <li>Misleading-advertising exposure: FTC and EU consumer regulators are aggressive about "save up to X%" claims that aren't substantiated.</li>
+  </ul>
+
+  <h3>Cost &amp; work to start</h3>
+  <ul>
+    <li>Cost: ~$0 to ~$5k legal review of subscription T&amp;Cs. Stripe billing setup is hours.</li>
+    <li>The product is deal-finding + alert delivery + retention. <strong>This is the most natural pivot for the AI engine already designed</strong> &mdash; the existing <code>price_observations</code> table (see <a href="caching-and-indexing.html">Caching &amp; Indexing</a>) is exactly the substrate for a "deal score".</li>
+  </ul>
+
+  <h3>Important details</h3>
+  <ul>
+    <li><strong>Auto-renewal disclosure laws:</strong> California ARL, FTC Negative Option Rule (2024 update), UK CMA subscription rules. Cancel-anytime + email confirmation of renewal are now the norm.</li>
+    <li>"Up to X% off" claims need substantiation files retained for 3 years in the US, 4 in the EU.</li>
+    <li><strong>App-store fees</strong> apply if you sell the subscription through iOS / Android in-app (15% year 1 / 30% on Apple; similar on Google). Selling via the web with magic-link login to mobile avoids this &mdash; Spotify-style.</li>
+    <li>This is the cleanest path to <strong>real negotiated discounts</strong> later: with 50k+ subscribers, airlines and tour operators will talk exclusive offers. The flywheel takes 2&ndash;3 years.</li>
+  </ul>
+
+  <div class="callout ok">
+    <span class="label">Fit</span>
+    Model 3 is the closest match to what's already designed. The engine produces ranked options on total cost, including open-jaw and intermodal alternatives most users wouldn't have searched for. The price-history table compounds into a "deal score" moat over months. No accreditation friction.
+  </div>
+
+  <h2>Model 4 &mdash; Service fee / markup</h2>
+  <p>You add a flat or % service fee on top of a flight/train/attraction sold via a partner. Two variants:</p>
+  <ul>
+    <li><strong>Variant A:</strong> You're an affiliate; the partner books; you bill the user separately for "planning / concierge" service.</li>
+    <li><strong>Variant B:</strong> You're a reseller (Model 2) and add a service fee at checkout. Common at Expedia / Booking ($15&ndash;35 / ticket typical), allowed under IATA Resolution 824 and explicitly non-commissionable (you keep 100%).</li>
+  </ul>
+
+  <h3>Upside</h3>
+  <ul>
+    <li>Predictable unit economics &mdash; a flat fee per booking, decoupled from commission rates.</li>
+    <li>Defensible because it's tied to a service (AI planning, multi-stop composition, optimization), not gatekeeping.</li>
+    <li>Travel agents have done this for 50 years; the legal posture is well-trodden.</li>
+  </ul>
+
+  <h3>Downside</h3>
+  <ul>
+    <li><strong>Variant A is fragile</strong> &mdash; you can't enforce a planning fee for a booking the user could complete without you. Anti-circumvention clauses are hard to write and harder to enforce against consumers. This works for <strong>B2B</strong> (corporate travel managers) precisely because of that.</li>
+    <li>Variant B requires you to be a full reseller &mdash; back to all of Model 2's overhead.</li>
+    <li>Optical: users compare your total to Google Flights; if you're $25 higher, you lose the click. The fee has to be invisibly bundled, justified by tangible value (status, refund flexibility, AmEx-style concierge), or applied only to change / cancellation flows where it reads as work-for-money.</li>
+  </ul>
+
+  <h3>Important details</h3>
+  <ul>
+    <li>US DOT Part 399: service fees must be disclosed before payment &mdash; not a surprise.</li>
+    <li>EU drip-pricing enforcement (UK Digital Markets, Competition &amp; Consumers Act 2024 and EU equivalents): fees in the total advertised price.</li>
+    <li>Change / cancellation fees ($25&ndash;75 typical) are far more defensible than booking fees &mdash; users perceive them as work-for-money.</li>
+  </ul>
+
+  <h2>Side-by-side comparison</h2>
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Upfront</th><th>Time to launch</th><th>Margin / unit</th><th>Liability</th><th>Best for</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Affiliate</td><td>~$0</td><td>1&ndash;3 weeks</td><td>1&ndash;10% commission</td><td>None</td><td>Day-1 MVP, validating demand</td></tr>
+      <tr><td>Full reseller / OTA</td><td>$50&ndash;500k bonds / insurance</td><td>6&ndash;18 months</td><td>5&ndash;15% net</td><td>High (refunds, bankruptcies)</td><td>Scale stage; defensible only with volume</td></tr>
+      <tr><td>Subscription club</td><td>~$0&ndash;5k legal</td><td>2&ndash;6 weeks</td><td>$20&ndash;150 / sub-year</td><td>Low (consumer law only)</td><td>Best fit for the AI engine</td></tr>
+      <tr><td>Service fee</td><td>$0 (A) / Model 2 (B)</td><td>Days (A) / 6&ndash;18 mo (B)</td><td>$5&ndash;50 / booking</td><td>Low (A) / High (B)</td><td>B2B concierge or loyalty-card overlay</td></tr>
+    </tbody>
+  </table>
+
+  <h2>What I'd actually build, in order</h2>
+  <p>Given the AI engine, the price-observations table, and the multi-stop trip composition already designed:</p>
+  <ol>
+    <li><strong>Affiliate (Model 1) is table stakes.</strong> Day-one revenue with no legal surface. Trainline / FlixBus / Viator / GetYourGuide / Duffel deep-links earn while the rest of the product matures. The Phase 7 partnerships in the <a href="roadmap.html">Roadmap</a> are this &mdash; bring some of them earlier.</li>
+    <li><strong>Subscription discount club (Model 3) is the highest-leverage fit.</strong> The engine's outputs (cheapest open-jaw, intermodal alternatives, total-cost ranking, price drops over time via <code>price_observations</code>) are exactly what Going sells. No accreditation. The remaining work is curation, alerting, and retention loops on top of search.</li>
+    <li><strong>Service fee Variant A as a B2B angle.</strong> Travel agencies and corporate travel managers will pay for AI planning regardless of who books. White-label or per-seat licensing.</li>
+    <li><strong>Full OTA (Model 2) only after PMF.</strong> A 6&ndash;18 month accreditation timeline plus bonded capital is a tax on momentum that's better spent on the engine until the demand shape is known.</li>
+  </ol>
+
+  <div class="callout">
+    <span class="label">Sequence</span>
+    Affiliate now &rarr; subscription club at ~6 months &rarr; service fee / OTA at scale.
+  </div>
+
+  <h2>Important details that bite</h2>
+  <ul>
+    <li><strong>EU Package Travel Directive</strong> hits the moment a multi-stop planner sells flight+hotel or flight+train through your checkout, <em>even via affiliate</em> if you take the payment. Stay in pure deep-link mode and the user buys each leg from the operator &mdash; you stay out of "package organiser" status.</li>
+    <li><strong>Mistake fares</strong> are a magnet for subscription churn drama. Going pivoted away from leaning on them; learn from that.</li>
+    <li><strong>California Seller of Travel</strong> is the strictest US state regime &mdash; applies to anyone soliciting California residents regardless of where you're based. The $50k bond is the workaround if you don't operate a trust account.</li>
+    <li><strong>UK ATOL</strong> is mandatory for any flight package sold to a UK consumer, no de minimis. &pound;2.50 / passenger APC is non-negotiable.</li>
+    <li><strong>Negotiated discounts</strong> (IATA Net Rates, consolidator agreements, bulk-purchase) are not realistically available below ~10k bookings / year.</li>
+    <li><strong>Affiliate stacking caution.</strong> Some networks (Skyscanner, Kayak) forbid wrapping their links in a paid product. Read the affiliate terms before building a subscription on top.</li>
+    <li><strong>GDPR for trip data.</strong> Itineraries are sensitive personal data (location, dates, sometimes companions). A subscription club storing search history needs a DPA, a lawful basis, and a retention policy.</li>
+  </ul>
+
+  <h2>How this connects to the engine</h2>
+  <ul>
+    <li><a href="caching-and-indexing.html"><strong>Caching &amp; Indexing</strong></a> &mdash; the <code>price_observations</code> append-only log is the substrate for "deal score" alerts &mdash; the core asset of Model 3.</li>
+    <li><a href="cost-transparency.html"><strong>Cost Transparency</strong></a> &mdash; total-cost ranking is what makes the curated deals genuinely defensible vs. naive "lowest fare" alerts, and already satisfies DOT Part 399 full-fare disclosure.</li>
+    <li><a href="ground-transit.html"><strong>Ground Transit</strong></a> + <a href="places-and-poi.html"><strong>Places &amp; POI</strong></a> &mdash; multi-stop trip composition is the differentiated capability that justifies the subscription or B2B service fee.</li>
+    <li><a href="data-and-providers.html"><strong>Data &amp; Providers</strong></a> &mdash; the path from <code>fast-flights</code> (ToS-grey discovery) to Duffel (bookable inventory) is what unlocks Model 2 when it becomes worth it.</li>
+  </ul>
+
+  <h2>Where this slots into the roadmap</h2>
+  <p>Monetization is a <strong>parallel track</strong>, not a phase. Affiliate integrations can begin alongside Phase 0; subscription rollout naturally lines up after Phase 4 (web UI exists); OTA accreditation only after several months of validated demand. See the <a href="roadmap.html">Roadmap</a> decision checkpoints for the gating questions.</p>
+
+  <div class="pager">
+    <a href="places-and-poi.html"><span class="label">Previous</span>Places &amp; POI</a>
+    <a href="roadmap.html" class="next"><span class="label">Next</span>Roadmap</a>
+  </div>
+</main>
+</body>
+</html>
