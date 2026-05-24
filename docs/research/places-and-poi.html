@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Places &amp; POI Search — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html" class="active">Places</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Places &amp; POI Search</h1>
+  <p class="subtitle">Resolving landmarks, restaurants, and attractions from free text &mdash; so the agent can plan flights and ground transit around the places the user actually wants to visit.</p>
+
+  <h2>The problem</h2>
+  <p>Multi-stop trip planning starts with places, not airports. A user says "Louvre, then Versailles, then a Michelin restaurant in Lyon" and expects the agent to figure out the city clusters, the flight legs between them, and the ground transit within them. To do that, the NLU layer needs to resolve each free-text place reference into structured data &mdash; name, coordinates, city, category &mdash; and, where the use case calls for it, ratings, hours, photos, menus, and bookable links.</p>
+  <p>No single source covers all of that well. The plan is to compose, behind a swappable interface, the same way <code>FlightProvider</code> composes flight sources.</p>
+
+  <h2>What place data we need</h2>
+  <table>
+    <thead>
+      <tr><th>Category</th><th>What it answers</th><th>Required for</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Geocoding / POI lookup</td><td>"Eiffel Tower" &rarr; (48.8584, 2.2945), Paris, landmark</td><td>Mapping place &rarr; city &rarr; airport cluster</td></tr>
+      <tr><td>Rich metadata</td><td>Hours, price tier, category, photos, popular times</td><td>"Open Sunday morning?", "Is this casual or fine dining?"</td></tr>
+      <tr><td>Reviews</td><td>User text reviews + aggregate scores</td><td>Ranking ambiguous "Michelin restaurant in Lyon"</td></tr>
+      <tr><td>Menus &amp; restaurant detail</td><td>Cuisine, dish-level data, dietary tags</td><td>"Vegetarian-friendly tasting menu under &euro;100"</td></tr>
+      <tr><td>Bookable inventory</td><td>Reservations, attraction tickets, time slots</td><td>Deep-link out so the user can actually book</td></tr>
+      <tr><td>Discovery / curation</td><td>"Best ramen in Tokyo", editorial lists</td><td>Open-ended planning when the user lists a vibe, not a name</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Providers by category</h2>
+
+  <h3>Geocoding &amp; POI lookup</h3>
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Cost</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>OpenStreetMap <strong>Nominatim</strong></td><td>Free, self-hostable</td><td>Public instance limited to ~1 req/s; self-host for scale</td></tr>
+      <tr><td><strong>Overpass API</strong> (OSM)</td><td>Free</td><td>Best for category queries ("all museums within 5km of X")</td></tr>
+      <tr><td><strong>Wikidata SPARQL</strong></td><td>Free</td><td>Structured landmark data, multilingual names</td></tr>
+      <tr><td><strong>Mapbox Geocoding / Search Box</strong></td><td>100k/mo free, then $0.50&ndash;$5/1k</td><td>Solid global coverage; commercial-friendly</td></tr>
+      <tr><td><strong>Pelias / Photon</strong></td><td>Free, self-hosted</td><td>OSS Mapbox alternatives backed by OSM</td></tr>
+      <tr><td><strong>Google Geocoding</strong></td><td>$5/1k after $200/mo credit</td><td>Best global quality; ToS caps caching</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Rich metadata + reviews</h3>
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Cost</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Google Places API (New)</strong></td><td>Text Search ~$32/1k, Details ~$17/1k, Photos ~$7/1k; $200/mo credit</td><td>Best global coverage; <strong>30-day cache cap</strong> in ToS, no verbatim review storage</td></tr>
+      <tr><td><strong>Yelp Fusion</strong></td><td>Free tier 500/day; paid via partnership</td><td>US restaurants strongest; caching + attribution restricted; UI mixing restrictions</td></tr>
+      <tr><td><strong>Foursquare Places</strong></td><td>Free tier 500/day; then per-call</td><td>Strong category data globally; weaker reviews than Google/Yelp</td></tr>
+      <tr><td><strong>TripAdvisor Content API</strong></td><td>Partner-only application</td><td>Best for attractions, hotels, reviews; approval can take weeks</td></tr>
+      <tr><td>OSM + Wikipedia/Wikidata enrichment</td><td>Free</td><td>No reviews; inconsistent metadata depth</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Menus &amp; restaurant detail</h3>
+  <div class="callout warn">
+    <span class="label">Honesty</span>
+    There is no clean public API for actual menu data at scale. Google Places sometimes carries a menu URL; specialized scraping is brittle and ToS-grey. Realistic v1 = deep-link the user out to the restaurant's own site.
+  </div>
+
+  <h3>Restaurant booking (all affiliate / partner-only)</h3>
+  <table>
+    <tbody>
+      <tr><td><strong>OpenTable Affiliate</strong></td><td>Deep-link + commission; partner registration required</td></tr>
+      <tr><td><strong>Resy</strong></td><td>No public API; partner-only; scraping is high-risk</td></tr>
+      <tr><td><strong>TheFork</strong> (EU, TripAdvisor-owned)</td><td>Affiliate program</td></tr>
+      <tr><td><strong>Quandoo</strong></td><td>Affiliate API for partners</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Attractions booking (all affiliate)</h3>
+  <table>
+    <tbody>
+      <tr><td><strong>Viator</strong> (TripAdvisor)</td><td>Affiliate API, commission-based, global</td></tr>
+      <tr><td><strong>GetYourGuide Partner API</strong></td><td>Affiliate; strong EU coverage</td></tr>
+      <tr><td><strong>Tiqets</strong></td><td>Affiliate; museums + attractions focus</td></tr>
+      <tr><td><strong>Klook</strong></td><td>Affiliate; APAC strength</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Discovery / curation</h3>
+  <ul>
+    <li><strong>Wikivoyage</strong> &mdash; scraping is fully legal under CC-BY-SA; great for offline seeding.</li>
+    <li><strong>Atlas Obscura, Eater, Michelin Guide</strong> &mdash; scraping is brittle and ToS-grey; treat as curated seed lists.</li>
+    <li><strong>LLM-generated suggestions</strong> (Claude, the existing NLU layer) grounded against a free POI source &mdash; cheap and surprisingly effective for "best X in Y" prompts.</li>
+  </ul>
+
+  <h2>The three cost models</h2>
+  <p>Sized at <strong>1k searches/day &times; 3 POI lookups avg &times; 70% cache hit</strong> &asymp; 27k live calls/month.</p>
+
+  <h3>Model 1 &mdash; Free / OSS first (~$0&ndash;$50/mo)</h3>
+  <ul>
+    <li>Self-hosted Nominatim + Overpass + Wikidata for geocoding and category discovery.</li>
+    <li>Foursquare free tier (500/day) + Yelp Fusion free tier (500/day) for the small slice that needs ratings or hours.</li>
+    <li>Affiliate deep-links (OpenTable, Viator, GetYourGuide) for booking &mdash; free to integrate, revenue share on the way back.</li>
+    <li><em>Gaps:</em> no photos at scale, spotty restaurant ratings outside the US, no menus.</li>
+  </ul>
+
+  <h3>Model 2 &mdash; Best quality, paid (~$200&ndash;$800/mo realistic, ~$2.5k naive)</h3>
+  <ul>
+    <li>Google Places API primary for metadata + reviews + photos.</li>
+    <li>Yelp Fusion paid tier for US restaurant ranking.</li>
+    <li>TripAdvisor Content API for attractions + hotels + reviews.</li>
+    <li>Mapbox Geocoding for fast structured lookups.</li>
+    <li>Affiliate booking layered on top.</li>
+    <li>Naive cost at 27k live calls/mo of Google Places Text+Details+Photos &asymp; <strong>$1.5&ndash;2.5k/mo</strong> before free credit. With 7-day caching and lookup dedup, realistically <strong>$200&ndash;500/mo</strong>.</li>
+    <li><em>Watch:</em> Google's ToS caps caching at 30 days for most fields and forbids storing reviews verbatim &mdash; the cache has to respect that.</li>
+  </ul>
+
+  <h3>Model 3 &mdash; Strictly free / OSS-only (~$0/mo, real engineering cost)</h3>
+  <ul>
+    <li>Nominatim + Overpass + Wikidata + Wikivoyage scraping.</li>
+    <li>LLM-grounded suggestions to compensate ("based on Wikipedia and Wikivoyage, here are 5 Lyon restaurants known for X").</li>
+    <li>Affiliate booking still works.</li>
+    <li><em>Gaps:</em> no reviews, no photos, no hours confirmation, no menus. Can't reliably rank restaurants.</li>
+  </ul>
+
+  <div class="callout">
+    <span class="label">The pick</span>
+    Hybrid &mdash; OSS-first with a paid escalation layer. Same playbook as the flight side: cheapest path tried first, paid only when the cheap path can't answer, all behind one interface.
+  </div>
+
+  <h2>Scraping &amp; CLI tools &mdash; what's safe, what's not</h2>
+  <table>
+    <thead>
+      <tr><th>Approach</th><th>Posture</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Scraping Google Maps / TripAdvisor / Yelp</td><td>ToS-prohibited</td><td>Technically possible, legally risky; Bright Data doesn't change the ToS posture</td></tr>
+      <tr><td>Scraping Wikipedia / Wikivoyage / OSM dumps</td><td>Legal, CC-BY-SA / ODbL</td><td>Attribution required; great for offline seeding</td></tr>
+      <tr><td>CLI tools (<code>osmium</code>, <code>osm2pgsql</code>, <code>valhalla</code>, <code>nominatim</code>, <code>wikidata-cli</code>)</td><td>Useful</td><td>For bulk seeding, not for live request serving</td></tr>
+      <tr><td>Headless scraping for Resy / OpenTable</td><td>Bad idea</td><td>Breaks weekly, gets IP-banned, violates ToS &mdash; affiliate programs exist so you don't have to</td></tr>
+    </tbody>
+  </table>
+
+  <h2>The <code>PlaceProvider</code> interface</h2>
+  <p>Same pattern as <code>FlightProvider</code> / <code>TransitProvider</code> / <code>LLMProvider</code>. Capability flags let the orchestrator route per-query without provider-specific branching downstream.</p>
+  <pre><code>class PlaceProvider(Protocol):
+    name: str
+    capability: PlaceCapability
+
+    async def resolve(
+        self,
+        query: str,
+        *,
+        near: GeoPoint | None = None,
+        category_hint: PlaceCategory | None = None,
+        limit: int = 5,
+    ) -> list[PlaceCandidate]: ...
+
+    async def details(
+        self,
+        place_id: str,
+    ) -> PlaceDetails: ...
+
+    async def search_nearby(
+        self,
+        center: GeoPoint,
+        radius_m: int,
+        category: PlaceCategory,
+        *,
+        rank_by: Literal["relevance", "rating", "distance"] = "relevance",
+    ) -> list[PlaceCandidate]: ...
+
+    async def booking_link(
+        self,
+        place_id: str,
+        when: Datetime | None = None,
+        party_size: int = 2,
+    ) -> str | None: ...
+
+@dataclass
+class PlaceCapability:
+    regions: set[Region]
+    categories: set[PlaceCategory]      # LANDMARK, RESTAURANT, ATTRACTION, HOTEL, ...
+    returns_ratings: bool
+    returns_hours: bool
+    returns_photos: bool
+    returns_reviews: bool
+    has_booking: bool
+    cache_ttl_max_days: int             # 7 for Google, 30 for OSM, etc.
+    license: License                    # ODbL, GoogleToS, YelpToS, ...
+    typical_latency_ms: int
+    rate_limit_per_minute: int | None
+
+@dataclass
+class PlaceCandidate:
+    place_id: str                       # provider-scoped
+    name: str
+    coords: GeoPoint
+    city: str
+    country: str
+    category: PlaceCategory
+    rating: float | None
+    price_tier: int | None              # 1&ndash;4 ($-$$$$)
+    provider: str
+    confidence: float</code></pre>
+
+  <h2>The hybrid recommendation (what I'd actually build)</h2>
+  <p>Three tiers, tried in order:</p>
+  <ol>
+    <li><strong>Tier 1 (free, always first):</strong> self-hosted Nominatim + Overpass + Wikidata. Covers ~80% of <code>resolve_poi</code> calls (well-known landmarks, museums, neighborhoods).</li>
+    <li><strong>Tier 2 (free w/ quota):</strong> Foursquare free tier when hours or category needed but reviews aren't.</li>
+    <li><strong>Tier 3 (paid, only when prior tiers can't answer):</strong> Google Places for ambiguous restaurants, photo-rich answers, rating-ranked discovery. Yelp Fusion for US-specific restaurant ranking.</li>
+    <li><strong>Booking:</strong> affiliate deep-link out &mdash; OpenTable, Viator, GetYourGuide, Tiqets. No inline booking in v1.</li>
+  </ol>
+
+  <h2>Multi-stop trip composition</h2>
+  <p>How POIs feed back into the existing search engine:</p>
+  <ol>
+    <li>NLU extracts a list of POI references from the user message via a new <code>resolve_poi</code> tool (see <a href="nlu-and-llms.html">NLU &amp; LLMs</a>).</li>
+    <li><code>PlaceProvider</code> resolves each reference to a <code>PlaceCandidate</code>, asking the user for disambiguation when confidence is low (same flow as <code>resolve_location</code> today).</li>
+    <li>POIs are <strong>clustered by city / region</strong> using the existing <code>city_groups</code> + a small radius rule.</li>
+    <li>Each cluster becomes a destination in a multi-leg <code>SearchRequest</code>. Order is preserved when the user implies it ("Louvre, then Versailles, then Lyon"); optimized otherwise.</li>
+    <li>Ground transit within a cluster is computed by the existing <code>TransitProvider</code>s (see <a href="ground-transit.html">Ground Transit</a>).</li>
+    <li>Results are presented as a single multi-stop journey with bookable deep-links per stop.</li>
+  </ol>
+  <pre><code>"Louvre, then Versailles, then a Michelin restaurant in Lyon"
+        &darr; NLU resolve_poi &times; 3
+[Louvre (Paris), Versailles (Paris)], [Michelin (Lyon, ambiguous &rarr; clarify)]
+        &darr; cluster
+PAR (Paris) &rarr; LYS (Lyon)
+        &darr; SearchRequest with two destinations, ordered
+flights + ground + ground = multi-stop journey</code></pre>
+
+  <h2>Caching strategy</h2>
+  <p>POI data is much less volatile than flight prices &mdash; addresses move rarely, ratings move slowly, hours change seasonally. But provider ToS constrains how long you can hold data; design the cache around it.</p>
+  <pre><code>place_cache (
+    cache_key       text primary key,       -- hash(provider, query, near)
+    provider        text not null,
+    place_id        text,                   -- provider-scoped
+    payload         jsonb not null,         -- normalized PlaceCandidate(s)
+    fetched_at      timestamptz not null,
+    expires_at      timestamptz not null,
+    license         text not null           -- enforced on read
+);
+create index on place_cache (expires_at);
+create index on place_cache (provider, place_id);
+
+-- TTLs by provider (enforced at write):
+--   Google Places       :  7 days   (under 30-day ToS cap)
+--   Yelp Fusion         :  7 days
+--   Foursquare          : 14 days
+--   OSM / Wikidata      : 30 days
+--   Nominatim self-host : 30 days</code></pre>
+  <p>Same negative-cache idea from <a href="caching-and-indexing.html">Caching</a> applies: cache "no Michelin restaurant matching X in Lyon" for 7 days, soft-invalidate on user-reported staleness.</p>
+
+  <h2>Integration with existing layers</h2>
+  <ul>
+    <li><a href="architecture.html"><strong>Architecture</strong></a> &mdash; <code>PlaceProvider</code> is the fourth provider protocol alongside <code>FlightProvider</code>, <code>TransitProvider</code>, <code>LLMProvider</code>.</li>
+    <li><a href="nlu-and-llms.html"><strong>NLU</strong></a> &mdash; new <code>resolve_poi</code> tool with disambiguation flow; the user's place references become structured POIs before flights are searched.</li>
+    <li><a href="caching-and-indexing.html"><strong>Caching</strong></a> &mdash; new <code>place_cache</code> table with provider-aware TTLs.</li>
+    <li><a href="cost-transparency.html"><strong>Cost</strong></a> &mdash; place-search calls show up in the cost breakdown as a small fixed overhead per search (~&lt;$0.01/search at Tier-1, &lt;$0.05 when Tier-3 fires).</li>
+    <li><a href="ground-transit.html"><strong>Ground Transit</strong></a> &mdash; ground transit within a city cluster connects resolved POIs; existing connection rules apply.</li>
+  </ul>
+
+  <h2>Risks worth tracking</h2>
+  <ul>
+    <li><strong>Google Places ToS</strong> &mdash; 30-day cache cap on most fields, no verbatim review storage, attribution required. The cache schema has to enforce per-provider TTLs at write time.</li>
+    <li><strong>Yelp Fusion ToS</strong> &mdash; caching restrictions plus attribution; some UI patterns prohibit mixing Yelp data with non-Yelp data.</li>
+    <li><strong>OSM ODbL</strong> &mdash; share-alike applies to <em>derivative databases</em>. Using OSM in your product is fine; redistributing a derived DB is the concern. Attribution required.</li>
+    <li><strong>Affiliate compliance</strong> &mdash; registered-partner requirement, link disclosure, commission structures vary by program.</li>
+    <li><strong>POI volatility</strong> &mdash; restaurants close, hours shift seasonally. Same negative-cache and user-feedback patterns as on the flight side.</li>
+    <li><strong>Disambiguation cost</strong> &mdash; "a Michelin restaurant in Lyon" forces a clarification round-trip. Mitigate by letting the agent offer 3 top picks inline rather than asking open-endedly.</li>
+  </ul>
+
+  <h2>Where this slots into the roadmap</h2>
+  <p>New <strong>Phase 3.5 &mdash; Places &amp; multi-stop planning</strong> (~1&ndash;2 weeks), between current Phase 3 (rail/bus) and Phase 4 (web UI). See <a href="roadmap.html">Roadmap</a> for the updated phase order and decision checkpoints.</p>
+
+  <div class="pager">
+    <a href="ground-transit.html"><span class="label">Previous</span>Ground Transit</a>
+    <a href="roadmap.html" class="next"><span class="label">Next</span>Roadmap</a>
+  </div>
+</main>
+</body>
+</html>

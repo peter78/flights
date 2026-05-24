@@ -16,6 +16,7 @@
   <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
   <a href="cost-transparency.html">Cost</a>
   <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html">Places</a>
   <a href="roadmap.html">Roadmap</a>
 </nav>
 
@@ -36,7 +37,8 @@
  &#9474;  &#9474;(Claude)&#9474;      &#9474;orchestrator &#9474;      &#9474;+ ranker/filters&#9474;             &#9474;
  &#9474;  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;             &#9474;
  &#9474;                                                                    &#9474;
- &#9474;  Provider interfaces:  FlightProvider  TransitProvider  LLMProvider &#9474;
+ &#9474;  Provider interfaces:  FlightProvider  TransitProvider               &#9474;
+ &#9474;                        LLMProvider     PlaceProvider                 &#9474;
  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
               &#9474;                                       &#9474;
    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
@@ -51,6 +53,8 @@
    &#9474;   Rome2RioProvider     &#9474;
    &#9474;   ClaudeLLMProvider    &#9474;
    &#9474;   LlamaLLMProvider     &#9474;
+   &#9474;   OSMPlaceProvider     &#9474;
+   &#9474;   GooglePlacesProvider &#9474;
    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
 
   <h2>Layers</h2>
@@ -74,7 +78,7 @@
   <p>Joins each itinerary against the fee KB and the user's preferences, produces a <code>CostBreakdown</code>, ranks by a composite score with user-tunable weights.</p>
 
   <h3>Provider interfaces</h3>
-  <p>Three protocols. Every external dependency lives behind one of them.</p>
+  <p>Four protocols. Every external dependency lives behind one of them. <code>PlaceProvider</code> joins the set to support multi-stop trip planning (see <a href="places-and-poi.html">Places &amp; POI</a>).</p>
 
   <h2>Core data types</h2>
   <pre><code>SearchRequest:
@@ -137,7 +141,14 @@ class LLMProvider(Protocol):
     async def complete(self, messages, tools=None) -> Response: ...
     async def call_tools(self, messages, tools) -> ToolCalls: ...
     supports_cached_prompt: bool
-    supports_json_schema: bool</code></pre>
+    supports_json_schema: bool
+
+class PlaceProvider(Protocol):
+    capability: PlaceCapability    # regions, categories, ratings, hours, ToS-cap TTL
+    async def resolve(self, query, *, near=None, category_hint=None) -> list[PlaceCandidate]: ...
+    async def details(self, place_id) -> PlaceDetails: ...
+    async def search_nearby(self, center, radius_m, category) -> list[PlaceCandidate]: ...
+    async def booking_link(self, place_id, when=None, party_size=2) -> str | None: ...</code></pre>
 
   <h2>Provider capability flags</h2>
   <p>Capabilities are introspected at startup so the orchestrator can route work to the right provider without per-provider conditionals downstream.</p>

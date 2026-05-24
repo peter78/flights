@@ -16,6 +16,7 @@
   <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
   <a href="cost-transparency.html">Cost</a>
   <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html">Places</a>
   <a href="roadmap.html">Roadmap</a>
 </nav>
 
@@ -48,6 +49,7 @@
       <tr><td>Schedules (departure times, frequency)</td><td>Weekly</td><td>Cache 7&ndash;30d; OAG/Cirium if you can afford it</td><td>Powers "morning flights only?" without a live call.</td></tr>
       <tr><td><strong>Live prices</strong></td><td><strong>Minutes</strong></td><td><strong>Short TTL (5&ndash;15 min) + stale-while-revalidate</strong></td><td>Don't try to be authoritative; be fast.</td></tr>
       <tr><td><strong>Historical prices</strong></td><td>Append-only</td><td><strong>Log every query result</strong></td><td>The moat. See below.</td></tr>
+      <tr><td>POI / place data</td><td>Weeks (paid ToS-capped); months (OSM)</td><td><code>place_cache</code> with provider-aware TTLs</td><td>7d for Google/Yelp (under 30d ToS), 30d for OSM. See <a href="places-and-poi.html">Places</a>.</td></tr>
     </tbody>
   </table>
 
@@ -67,6 +69,7 @@
                                           &#9474;   airline_fee_profile        &#9474;
                                           &#9474;   city_groups                 &#9474;
                                           &#9474;   protected_intermodal        &#9474;
+                                          &#9474;   place_cache                 &#9474;
                                           &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
 
   <h2>1. Query-result cache</h2>

@@ -16,6 +16,7 @@
   <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
   <a href="cost-transparency.html">Cost</a>
   <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html">Places</a>
   <a href="roadmap.html" class="active">Roadmap</a>
 </nav>
 
@@ -57,6 +58,16 @@
     <li>Composition: <code>[Ground, Flight, Ground]</code> journey assembly with connection-rule enforcement.</li>
   </ul>
 
+  <h2>Phase 3.5 &mdash; places &amp; multi-stop planning (1&ndash;2 weeks)</h2>
+  <ul>
+    <li><code>PlaceProvider</code> interface + <code>OSMPlaceProvider</code> (Nominatim + Overpass + Wikidata) + <code>GooglePlacesProvider</code> adapter.</li>
+    <li><code>resolve_poi</code> NLU tool with disambiguation flow.</li>
+    <li>Multi-stop trip composition: cluster POIs by city &rarr; infer flight legs between clusters &rarr; ground transit within.</li>
+    <li><code>place_cache</code> table with provider-aware TTLs (7d under Google's 30d ToS cap, 30d for OSM/Wikidata).</li>
+    <li>Affiliate-partner registrations (OpenTable, Viator, GetYourGuide, Tiqets) on a parallel, slower clock.</li>
+    <li>See <a href="places-and-poi.html">Places &amp; POI</a> for the provider lineup and the three cost models.</li>
+  </ul>
+
   <h2>Phase 4 &mdash; web UI (2&ndash;3 weeks)</h2>
   <ul>
     <li>Next.js PWA &mdash; doubles as mobile v0.</li>
@@ -87,7 +98,7 @@
   </ul>
 
   <h2>Total timeline</h2>
-  <p>Phases 0&ndash;6 are roughly <strong>9&ndash;13 weeks</strong> for one engineer working full-time, depending on how clean the HAFAS integration goes and how much UI polish is taken on in Phase 4. Phases 0&ndash;1 (~3 weeks) deliver a working text-in, ranked-results-out engine; Phases 2&ndash;3 (~3 weeks) add the multimodal magic; Phase 4 (~3 weeks) ships a usable product.</p>
+  <p>Phases 0&ndash;6 are roughly <strong>10&ndash;15 weeks</strong> for one engineer working full-time, depending on how clean the HAFAS integration goes and how much UI polish is taken on in Phase 4. Phases 0&ndash;1 (~3 weeks) deliver a working text-in, ranked-results-out engine; Phases 2&ndash;3 (~3 weeks) add the multimodal magic; Phase 3.5 (~1&ndash;2 weeks) adds multi-stop trip planning; Phase 4 (~3 weeks) ships a usable product.</p>
 
   <h2>Decision checkpoints</h2>
   <table>
@@ -98,6 +109,7 @@
       <tr><td>fast-flights stable?</td><td>End Phase 0</td><td>Whether to budget for Duffel earlier than planned, based on parser fragility and Google block rates.</td></tr>
       <tr><td>NLU quality bar met?</td><td>End Phase 1</td><td>If Claude Haiku falls short on disambiguation, escalate to Sonnet for that one call; revisit OSS only above 100k searches/day.</td></tr>
       <tr><td>HAFAS access granted?</td><td>Mid Phase 3</td><td>If DB tightens unofficially, fall back to Rome2Rio-only EU rail + flag prices as estimates.</td></tr>
+      <tr><td>Places: free tier enough?</td><td>End Phase 3.5</td><td>If OSM + Foursquare free tier covers &gt;80% of POI queries cleanly, defer Google Places. If restaurant ranking is the gap, turn on Tier 3 selectively.</td></tr>
       <tr><td>PWA enough?</td><td>~Week 4 post-launch</td><td>Native wrap only if iOS/Android-specific UX features (push notifications, offline saved trips) are demanded.</td></tr>
       <tr><td>Price history meaningful?</td><td>~3 months post-launch</td><td>Activate "deal score" feature; consider seeded scrapes at scale.</td></tr>
     </tbody>
@@ -150,7 +162,7 @@
   </div>
 
   <div class="pager">
-    <a href="ground-transit.html"><span class="label">Previous</span>Ground Transit</a>
+    <a href="places-and-poi.html"><span class="label">Previous</span>Places &amp; POI</a>
     <a href="index.html" class="next"><span class="label">Back to</span>Overview</a>
   </div>
 </main>

@@ -16,6 +16,7 @@
   <a href="nlu-and-llms.html" class="active">NLU &amp; LLMs</a>
   <a href="cost-transparency.html">Cost</a>
   <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html">Places</a>
   <a href="roadmap.html">Roadmap</a>
 </nav>
 
@@ -75,6 +76,21 @@
       "properties": {
         "text":  {"type": "string"},
         "today": {"type": "string", "format": "date"}
+      }
+    }
+  },
+  {
+    "name": "resolve_poi",
+    "description": "Resolve a free-text place to a structured POI \
+                    (landmark, restaurant, attraction, neighborhood). \
+                    Used by multi-stop trip planning. See Places &amp; POI.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query":         {"type": "string"},
+        "near":          {"type": "string"},        // city or coords hint
+        "category_hint": {"enum": ["landmark", "restaurant",
+                                   "attraction", "hotel", "neighborhood"]}
       }
     }
   },
