@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unit Economics &mdash; AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html">Places</a>
+  <a href="monetization-and-reseller.html">Monetization</a>
+  <a href="unit-economics.html" class="active">Unit Economics</a>
+  <a href="evals.html">Evals</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Unit Economics</h1>
+  <p class="subtitle">What it costs to serve a search, what each monetization model is worth per search, and where the real swing variables live. Numbers are 2026 point estimates with wide bands &mdash; treat them as directional, not budgetable.</p>
+
+  <h2>Assumptions, stated up front</h2>
+  <ul>
+    <li>Average air ticket: <strong>$400</strong> round-trip, all-in.</li>
+    <li>Average EU rail leg: <strong>&euro;60</strong>; average EU bus leg: <strong>&euro;30</strong>; average attraction: <strong>$80</strong>.</li>
+    <li>Cache hit rate on popular routes: <strong>70&ndash;90%</strong> per the design in <a href="caching-and-indexing.html">Caching &amp; Indexing</a>.</li>
+    <li>Search&rarr;book click-through conversion: <strong>2&ndash;5%</strong> for air metasearch, <strong>3&ndash;7%</strong> for rail, <strong>2&ndash;5%</strong> for attractions. These are the most uncertain numbers in the whole analysis.</li>
+    <li>Pricing reflects late-2025 / early-2026 list rates for Claude Haiku 4.5, Bright Data residential proxies, Mapbox, Google Maps Platform, managed Postgres / Redis, Duffel.</li>
+    <li>Confidence bands on every number are roughly <strong>&plusmn;30&ndash;50%</strong>. The verdict survives 2&times; uncertainty on any single line.</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="label">Caveat</span>
+    These are the right kind of numbers to make architectural and sequencing decisions on. They are <em>not</em> the right kind of numbers to forecast a P&amp;L on. Past about 18 months out, every line is dominated by pricing trajectory of LLMs and proxies &mdash; both still falling fast.
+  </div>
+
+  <h2>The variable cost stack per search</h2>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Cost</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>NLU (Claude Haiku 4.5 + prompt caching)</td><td>$0.0005&ndash;0.002</td><td>~2&ndash;4k input tok, ~200&ndash;500 output; cached system prompt at ~10% of base</td></tr>
+      <tr><td>Sonnet escalation on low-confidence parse</td><td>$0.0002 amortized</td><td>~5% of queries &times; ~$0.005</td></tr>
+      <tr><td><code>fast-flights</code> via Bright Data residential</td><td>$0.001&ndash;0.003 / fetch</td><td>~150&ndash;300 KB HTML &times; ~$8&ndash;12/GB residential</td></tr>
+      <tr><td>Multi-origin fan-out multiplier</td><td>&times;5&ndash;15 fetches</td><td>Open-jaw, catchment-area, date-flex searches</td></tr>
+      <tr><td>Ground transit (Mapbox / DB HAFAS / Rome2Rio)</td><td>$0.001&ndash;0.005</td><td>2&ndash;6 transit calls typical</td></tr>
+      <tr><td>Places (Foursquare free tier or Google Places)</td><td>$0 &ndash; $0.10</td><td>Free tier covers v1; Google = $17/1k details</td></tr>
+      <tr><td>Postgres + Redis writes</td><td>~$0.0001</td><td>Negligible per call</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Composite per-search cost</h3>
+  <pre><code>amortized_cost = (1 - cache_hit_rate) * cold_cost
+               + cache_hit_rate * ~$0.0001</code></pre>
+  <ul>
+    <li>Simple round-trip, cold cache: <strong>$0.005&ndash;0.015</strong></li>
+    <li>Multi-origin / open-jaw / intermodal, cold cache: <strong>$0.02&ndash;0.08</strong></li>
+    <li>Full multi-stop trip with POIs, cold cache: <strong>$0.05&ndash;0.20</strong></li>
+    <li>At 80% cache hit rate, steady-state amortized costs are <strong>~20&ndash;25% of the cold-cache numbers above</strong>.</li>
+  </ul>
+
+  <h2>Fixed monthly costs (v1)</h2>
+  <table>
+    <thead>
+      <tr><th>Line</th><th>Cost / month</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Bright Data commercial plan minimum</td><td>~$500</td><td>The floor for any commercial scraping. Goes away at v2 if we move to Duffel.</td></tr>
+      <tr><td>Postgres (Neon / Supabase)</td><td>$25&ndash;100</td><td>Includes <code>price_observations</code> growth (see <a href="caching-and-indexing.html">Caching</a>)</td></tr>
+      <tr><td>Redis (Upstash)</td><td>$0&ndash;30</td><td>Free tier survives early traffic</td></tr>
+      <tr><td>App hosting (Fly / Railway / Render)</td><td>$30&ndash;100</td><td>Two small instances + Postgres connection pooler</td></tr>
+      <tr><td>Transactional email + domain + monitoring</td><td>$30&ndash;80</td><td>Postmark / Resend + Sentry + Grafana Cloud free tier</td></tr>
+      <tr><td>Eval harness (Tier 2 nightly + judge calls)</td><td>$20&ndash;100</td><td>See <a href="evals.html">Evals</a>; Sonnet judge dominates</td></tr>
+      <tr><td>Fee KB worker (weekly OSS LLM run)</td><td>$5&ndash;20</td><td>~20 airlines &times; long-context extraction</td></tr>
+      <tr><td><strong>Total fixed (v1)</strong></td><td><strong>~$600&ndash;1,000</strong></td><td>Bright Data is the swing factor</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Cost behaviour at three scale bands</h2>
+  <table>
+    <thead>
+      <tr><th>Searches / mo</th><th>Variable</th><th>Fixed</th><th>All-in / search</th><th>What dominates</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1k (private alpha)</td><td>~$5</td><td>~$700</td><td><strong>$0.70</strong></td><td>Bright Data floor</td></tr>
+      <tr><td>10k (closed beta)</td><td>~$50</td><td>~$800</td><td><strong>$0.085</strong></td><td>Bright Data floor</td></tr>
+      <tr><td>100k (early traction)</td><td>~$200&ndash;500</td><td>~$800</td><td><strong>~$0.01</strong></td><td>Variable &approx; fixed</td></tr>
+      <tr><td>1M (Going-ish-but-smaller)</td><td>~$3&ndash;7k</td><td>~$1.5&ndash;3k</td><td><strong>~$0.006</strong></td><td>Proxy + LLM</td></tr>
+      <tr><td>10M+ (Skyscanner-ish)</td><td>~$30&ndash;70k</td><td>~$3&ndash;5k</td><td><strong>~$0.004</strong></td><td>Proxy linearity forces GDS swap</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <span class="label">Two inflection points</span>
+    Around <strong>10k searches/mo</strong> the Bright Data floor stops dominating. Around <strong>500k&ndash;1M searches/mo</strong> proxy spend grows fast enough on the popular long tail to justify swapping <code>fast-flights</code> for Duffel / Kiwi / Amadeus on those routes &mdash; see <a href="data-and-providers.html">Data &amp; Providers</a>.
+  </div>
+
+  <h2>Revenue per search by monetization model</h2>
+  <p>Anchored to the four models in <a href="monetization-and-reseller.html">Monetization &amp; Reseller Legality</a>:</p>
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Take rate</th><th>Conversion</th><th>Revenue / search</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Air affiliate (Skyscanner, Duffel, Travelpayouts)</td><td>1&ndash;4%</td><td>2&ndash;5% click-to-book</td><td>$0.08&ndash;$0.80</td></tr>
+      <tr><td>Rail affiliate (Trainline, Rail Europe)</td><td>3&ndash;8%</td><td>3&ndash;7%</td><td>$0.05&ndash;$0.35</td></tr>
+      <tr><td>Bus affiliate (FlixBus, Omio)</td><td>5&ndash;7%</td><td>3&ndash;6%</td><td>$0.05&ndash;$0.13</td></tr>
+      <tr><td>Attractions (Viator, GYG, Tiqets)</td><td>8&ndash;12%</td><td>2&ndash;5%</td><td>$0.12&ndash;$0.50</td></tr>
+      <tr><td>Subscription ($79/yr ARPU, 50&ndash;100 searches/sub-yr)</td><td>n/a</td><td>n/a</td><td>~$0.80&ndash;$1.60 / search if subbed</td></tr>
+      <tr><td>Service fee Variant A (B2B concierge)</td><td>$5&ndash;25 / booking</td><td>seat-based, not search-based</td><td>n/a per search</td></tr>
+    </tbody>
+  </table>
+
+  <p>Blended affiliate per-search revenue for an aviation-only product at decent intent quality: <strong>$0.20&ndash;$0.80</strong>. With multi-stop trip composition pulling in ground + attractions revenue: <strong>$0.40&ndash;$1.50</strong>.</p>
+
+  <h2>Contribution margin by model at 100k searches/mo</h2>
+  <p>Holding fixed costs constant. CAC is priced separately below.</p>
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Rev / search</th><th>Cost / search</th><th>CM / search</th><th>Monthly CM</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Affiliate (air-only)</td><td>$0.20&ndash;0.80</td><td>$0.01</td><td>$0.19&ndash;0.79</td><td><strong>$19k&ndash;79k</strong></td></tr>
+      <tr><td>Affiliate (air + ground + attractions)</td><td>$0.40&ndash;1.50</td><td>$0.02</td><td>$0.38&ndash;1.48</td><td><strong>$38k&ndash;148k</strong></td></tr>
+      <tr><td>Subscription (5% of users sub at $79/yr)</td><td>$0.66 effective</td><td>$0.02 + ~$3/sub-yr amortized = $0.20</td><td>$0.46</td><td><strong>$46k</strong></td></tr>
+      <tr><td>Service fee Variant A (200 seats &times; $50/mo)</td><td>seat-based</td><td>seat-based</td><td>$10k MRR contribution</td><td><strong>$10k</strong></td></tr>
+      <tr><td>Full OTA at this scale</td><td colspan="4">Pointless &mdash; bond + accreditation + refund-reserve overhead can't amortize. Don't.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Subscription LTV detail</h3>
+  <ul>
+    <li>ARPU: $79/yr (Going low-tier baseline; high-tier $199 lifts blended ARPU into the $90&ndash;120 range only with a content treadmill).</li>
+    <li>COGS per subscriber per year: ~$0.50&ndash;$1 search compute + $1&ndash;3 email/alerts + $2&ndash;10 curation if AI-augmented + $3&ndash;5 payment processing &asymp; <strong>$10&ndash;20/yr</strong>.</li>
+    <li>Gross margin: <strong>75&ndash;85%</strong>.</li>
+    <li>Churn: 25&ndash;35% annual is normal for travel-deal subs; that's a <strong>~3&ndash;4 year LTV multiplier on ARPU</strong>.</li>
+    <li>Resulting LTV: <strong>$200&ndash;$320</strong>. Realistic blended CAC: <strong>$20&ndash;$60</strong>. LTV/CAC ~5&ndash;10&times; if the funnel converts.</li>
+  </ul>
+
+  <div class="callout ok">
+    <span class="label">Direction</span>
+    Subscription is the only model where LTV/CAC clearly exceeds 5&times; with reasonable assumptions. Affiliate is positive-contribution but doesn't compound; OTA can't amortize overhead until scale that takes years. The B2B angle is a separate parallel motion with different sales mechanics.
+  </div>
+
+  <h2>The sensitivities that actually matter</h2>
+  <ol>
+    <li><strong>Bright Data spend.</strong> At &lt;100k searches/mo it's a fixed tax that breaks unit economics; at 1M+ it goes variable and linear. Plan: subscription model carries the $500/mo floor early; bypassing into Duffel for popular routes later cuts both fixed and variable.</li>
+    <li><strong>Click-to-book conversion.</strong> 2% vs 5% is a 2.5&times; revenue swing. Dominated by deep-link handoff quality (parameter passing, currency, dates surviving) &mdash; not search engineering.</li>
+    <li><strong>Cache hit rate.</strong> 70% vs 90% changes variable cost by ~3&times;. The architecture is already designed for this; the open question is whether top-route concentration in real traffic matches the design assumption.</li>
+    <li><strong>Attach rate of ground + attractions.</strong> Multi-stop trip composition is the moat <em>and</em> the revenue multiplier. Pure aviation affiliate is a low-margin business; bundling lifts blended take rate ~2&times; (see <a href="ground-transit.html">Ground Transit</a> and <a href="places-and-poi.html">Places &amp; POI</a>).</li>
+    <li><strong>LLM pricing trajectory.</strong> Haiku has been on a steady downward path. If that continues, NLU effectively rounds to zero. Do not over-engineer for LLM cost reduction in v1.</li>
+  </ol>
+
+  <h2>What changes the math, in scenarios</h2>
+  <h3>Pessimistic (everything goes wrong)</h3>
+  <ul>
+    <li>Cache hit rate 50%, conversion 1.5%, Bright Data renegotiation pushes proxy cost +50%.</li>
+    <li>Per-search variable cost at 100k/mo doubles to ~$0.02. Revenue/search at $0.15. CM still positive at <strong>~$13k/mo</strong>, but payback on CAC becomes 4&ndash;6 bookings per user instead of 2&ndash;3.</li>
+  </ul>
+
+  <h3>Base case</h3>
+  <ul>
+    <li>Numbers as above. At 100k searches/mo, blended affiliate + 5% subscription attach: <strong>~$60&ndash;90k monthly contribution</strong>. Enough to fund one engineer + minimal marketing.</li>
+  </ul>
+
+  <h3>Optimistic (multi-stop attach works)</h3>
+  <ul>
+    <li>Cache hit 85%, multi-stop trip planner doubles ground + attraction attach, subscription attach 8%.</li>
+    <li>Blended revenue/search $1.10. Variable $0.015. CM/search $1.08 &times; 100k = <strong>~$108k/mo</strong>.</li>
+    <li>Subscription LTV approaches $400 with content + alert retention loops; this is the path to genuine venture-scale economics.</li>
+  </ul>
+
+  <h2>Where the headline OTA economics sit, for reference</h2>
+  <p>If we ever do graduate to full reseller (Model 2), per-booking economics look roughly:</p>
+  <ul>
+    <li>$400 ticket &times; 12% blended take rate = <strong>$48 gross</strong></li>
+    <li>Less payment processing 2.5%: $38 net</li>
+    <li>Less refund-reserve ~3% of GMV: $26&ndash;30 net</li>
+    <li>Less customer service per booking: $2&ndash;5</li>
+    <li><strong>Net contribution: $20&ndash;$25 per booking</strong></li>
+  </ul>
+  <p>That's attractive only after enough volume to amortize the $50&ndash;500k bonding + accreditation + working-capital drag. Don't model it inside v1.</p>
+
+  <h2>CAC, the variable I'm least confident about</h2>
+  <ul>
+    <li>Travel direct-to-consumer blended CAC ranges <strong>$20&ndash;$60</strong> across paid + organic in 2025/2026 data.</li>
+    <li>Subscription products skew lower if a free product feeds the funnel (which is exactly the affiliate-then-subscription setup recommended in <a href="monetization-and-reseller.html">Monetization</a>).</li>
+    <li>Organic SEO around long-tail intermodal queries ("munich to crete cheap with train") is realistically achievable because incumbents don't rank for them &mdash; this is the cheapest acquisition channel and the one that scales with the product itself.</li>
+    <li>Paid search against branded competitors is expensive and a money pit until LTV is proven.</li>
+  </ul>
+
+  <h2>Putting it together &mdash; the directional verdict</h2>
+  <ul>
+    <li>Search itself is cheap. Cents per search, not dollars. The cost story is the Bright Data floor early and proxy linearity at scale, not LLM tokens or DB writes.</li>
+    <li>Affiliate is the day-1 unlock and pays for itself instantly &mdash; but it does not compound. Treat it as a funding mechanism for the engine, not an end state.</li>
+    <li>Subscription is the natural high-CM business. The <code>price_observations</code> moat designed in <a href="caching-and-indexing.html">Caching</a> compounds month-over-month; multi-stop trip composition is what makes the deal feed differentiated from a Going clone.</li>
+    <li>B2B service-fee licensing is a real adjacent market worth a 1-engineer pilot at month 6&ndash;9. Different sales motion, different conversion economics, but same engine.</li>
+    <li>OTA is a future option. Sub-1M-booking volume can't amortize bonding + accreditation. Revisit only after subscription LTV &gt; $300 and &gt;100k monthly actives.</li>
+  </ul>
+
+  <div class="callout ok">
+    <span class="label">The bet</span>
+    Build the engine. Earn affiliate from day one to cover infrastructure. Layer subscription on top of <code>price_observations</code> at month ~6. Pilot B2B in parallel at month ~9. Don't touch OTA accreditation until the demand shape is so clear it would be malpractice not to.
+  </div>
+
+  <h2>Open questions to revisit with real data</h2>
+  <ul>
+    <li>What is our actual cache hit rate once we have 30 days of real traffic? Design assumes 70&ndash;90% but the long tail of natural-language queries may not concentrate as much as route-based searches do.</li>
+    <li>What's the click-to-book conversion delta between a "Protected intermodal" badged result and a generic one? If protected journeys convert 2&times; better, that changes ranker weights and affiliate priorities.</li>
+    <li>How much does the multi-stop trip planner lift blended revenue per session? This is the single biggest moat-or-not question.</li>
+    <li>Are subscribers retaining at &gt;65% annually? Anything lower kneecaps the LTV story.</li>
+    <li>Does B2B at $50&ndash;100 / seat / month actually clear? Or does the AI-planning category get cannibalised by Salesforce Concur / SAP Travel before we build it?</li>
+  </ul>
+
+  <h2>How this connects to the engine</h2>
+  <ul>
+    <li><a href="caching-and-indexing.html"><strong>Caching &amp; Indexing</strong></a> &mdash; cache hit rate is the single biggest variable-cost lever. The <code>price_observations</code> table is the subscription moat.</li>
+    <li><a href="data-and-providers.html"><strong>Data &amp; Providers</strong></a> &mdash; the path off Bright Data and onto Duffel/Amadeus is what flips the cost structure from "floor + small variable" to "no floor + small variable".</li>
+    <li><a href="nlu-and-llms.html"><strong>NLU &amp; LLMs</strong></a> &mdash; Haiku pricing trajectory is the optimistic-scenario driver; prompt caching is already designed in.</li>
+    <li><a href="monetization-and-reseller.html"><strong>Monetization</strong></a> &mdash; per-model take rates, accreditation overhead, and the legal posture of each path.</li>
+    <li><a href="evals.html"><strong>Evals</strong></a> &mdash; production telemetry (Tier 3) measures the actual cache hit rate, conversion, and stability metrics that this analysis hinges on.</li>
+    <li><a href="roadmap.html"><strong>Roadmap</strong></a> &mdash; sequence and decision checkpoints are calibrated to these economics.</li>
+  </ul>
+
+  <div class="pager">
+    <a href="monetization-and-reseller.html"><span class="label">Previous</span>Monetization</a>
+    <a href="evals.html" class="next"><span class="label">Next</span>Evals</a>
+  </div>
+</main>
+</body>
+</html>
