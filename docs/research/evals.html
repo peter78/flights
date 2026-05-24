@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evals &amp; Measurement — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="places-and-poi.html">Places</a>
+  <a href="monetization-and-reseller.html">Monetization</a>
+  <a href="evals.html" class="active">Evals</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Evals &amp; Measurement</h1>
+  <p class="subtitle">Split by layer, not by feature. Four tiers, different cadences, different oracles. The fixture suite catches regressions on every PR; the live suite catches reality drift overnight; production telemetry tells you what users actually experience.</p>
+
+  <h2>The problem</h2>
+  <p>A flight-search engine has at least five things that can quietly break: the NLU misreads a query, the orchestrator prunes too aggressively, the cost normalizer applies the wrong fare brand, the ranker picks a dominated option, a provider parser silently degrades. Each fails on its own timescale, with its own oracle (what would the right answer have been?), and at its own cost to grade. One eval can't cover all of them.</p>
+  <p>The reframe: build a measurement <em>system</em>, not a test suite. Each layer gets the eval that fits its bar.</p>
+
+  <h2>Four tiers</h2>
+  <table>
+    <thead>
+      <tr><th>Tier</th><th>What it measures</th><th>Cadence</th><th>Oracle</th><th>Cost / run</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>1 &mdash; Fixture unit evals</strong></td><td>Each component on frozen inputs</td><td>Every PR (CI)</td><td>Hand-graded expected output</td><td>Seconds, $0</td></tr>
+      <tr><td><strong>2 &mdash; Live end-to-end</strong></td><td>Whole pipeline on real providers</td><td>Nightly</td><td>Google Flights / Skyscanner + LLM judge</td><td>~20 min, ~$1&ndash;3</td></tr>
+      <tr><td><strong>3 &mdash; Production telemetry</strong></td><td>What users actually experience</td><td>Continuous</td><td>Funnel metrics, no pass/fail</td><td>Always-on</td></tr>
+      <tr><td><strong>4 &mdash; Price-history backtests</strong></td><td>Deal score / predictive models</td><td>Weekly</td><td>Walk-forward on <code>price_observations</code></td><td>Minutes</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Tier 1 &mdash; Fixture-based unit evals</h2>
+  <p>Record provider responses (fast-flights HTML, HAFAS JSON, Claude tool-call outputs, fee-page snapshots) once. Replay forever. Each component graded in isolation against frozen inputs. This is the eval surface that runs on every PR and gates the build.</p>
+
+  <h3>Per-component fixtures</h3>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Fixture shape</th><th>Grader</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>NLU</strong></td><td>~50&ndash;100 free-text queries &rarr; expected <code>SearchRequest</code> or <code>NeedsClarification</code></td><td>Structural (valid JSON), semantic (field-by-field match), behavior (clarified when ambiguous)</td></tr>
+      <tr><td><strong>Orchestrator</strong></td><td><code>SearchRequest</code> + recorded provider responses &rarr; expected <code>Journey</code> set</td><td>Set diff on canonical journey hashes; pruning correctness checks</td></tr>
+      <tr><td><strong>Composition</strong></td><td>Leg lists &rarr; expected valid journeys</td><td>Connection-rule pass/fail; intermodal detection</td></tr>
+      <tr><td><strong>Cost normalizer</strong></td><td>Itinerary + fee KB snapshot &rarr; expected <code>CostBreakdown</code></td><td>Numeric equality on each line item</td></tr>
+      <tr><td><strong>Ranker</strong></td><td>Journey set + weights &rarr; expected order</td><td>Kendall&apos;s tau vs expected; exact top-K match</td></tr>
+      <tr><td><strong>Place resolver</strong></td><td>Free-text place &rarr; expected <code>PlaceCandidate</code> list</td><td>Top-1 match rate; rank of correct candidate</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <span class="label">Why fixtures</span>
+    Live providers move. A test that passed yesterday and fails today because Google Flights repriced isn&apos;t a regression &mdash; it&apos;s noise. Fixtures separate "the code changed" from "the world changed", which is the only useful signal in CI.
+  </div>
+
+  <h3>Gate condition</h3>
+  <ul>
+    <li>Per-category accuracy drop &gt; 3% &rarr; fail the build.</li>
+    <li>Any new category at &lt; 80% &rarr; fail the build (forces eval set to grow with features).</li>
+    <li>Total runtime cap: 30s. Anything slower belongs in Tier 2.</li>
+  </ul>
+
+  <h2>Tier 2 &mdash; Live end-to-end evals</h2>
+  <p>A small golden set (~30 queries) hits the running system with live providers. Output compared to an oracle. Runs nightly, posts a report.</p>
+
+  <h3>Two oracles, both flawed; use both</h3>
+  <ul>
+    <li><strong>Comparator scrape</strong> &mdash; for each query, fetch the cheapest result from Google Flights / Skyscanner / Kayak at the same wall-clock minute. Metric: "found cheapest within $X / Y%". Falls apart for multi-airport and intermodal queries because the comparators don&apos;t do them, so flag those queries as comparator-exempt.</li>
+    <li><strong>LLM-as-judge</strong> &mdash; another Claude call grades each top-3 result against a rubric ("is this a reasonable answer to the user&apos;s query?"). Stable if you also hand-grade 10&ndash;15% of the same set as ground truth and re-validate the judge weekly. Catches the multi-axis cases that comparators can&apos;t.</li>
+  </ul>
+
+  <h3>Split metrics by archetype</h3>
+  <p>Average accuracy hides regressions in the long tail. Bucket every golden query into one of:</p>
+  <ul>
+    <li>Simple round-trip (single origin, single dest)</li>
+    <li>Multi-origin (catchment-area search)</li>
+    <li>Open-jaw</li>
+    <li>Intermodal (rail/bus + flight)</li>
+    <li>Date-flexible (&plusmn;N days, cheapest week)</li>
+    <li>Multi-stop trip (POIs &rarr; flight legs)</li>
+  </ul>
+  <p>Report accuracy per bucket. A simple-round-trip regression and an intermodal regression are different failures with different owners.</p>
+
+  <h3>Stability as its own metric</h3>
+  <p>Same query, run twice five minutes apart. How much does top-3 churn? High churn means the ranker is too tightly coupled to noisy provider responses, or that scoring weights are pathologically close on common journeys. Track median Jaccard overlap on top-3 across paired runs; alert under 0.7.</p>
+
+  <h2>Tier 3 &mdash; Production telemetry</h2>
+  <p>Continuous, no pass/fail. These are funnel metrics that tell you what users <em>experience</em>, which fixture evals can&apos;t capture.</p>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Why it matters</th><th>Alert when</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>NLU clarification rate</td><td>If users get asked too often, the NLU is over-cautious; too rarely, it&apos;s silently guessing</td><td>&lt; 5% or &gt; 25% (per archetype)</td></tr>
+      <tr><td>Time-to-first-result (p50, p95)</td><td>SSE first-byte; the perceived speed</td><td>p95 &gt; 4s sustained</td></tr>
+      <tr><td>Time-to-complete (p50, p95)</td><td>Last result streamed</td><td>p95 &gt; 12s sustained</td></tr>
+      <tr><td>Provider call fan-out</td><td>Pruning effectiveness; cost driver</td><td>Median &gt; 30 calls / query</td></tr>
+      <tr><td>Cache hit rate (search_result_cache)</td><td>Drives cost &amp; latency</td><td>&lt; 40% on popular routes</td></tr>
+      <tr><td>Negative-cache effectiveness</td><td>How many fan-outs skipped</td><td>Track trend, no hard threshold</td></tr>
+      <tr><td>Click-through to deep-link</td><td>Did the ranking surface something worth clicking?</td><td>&lt; 15% sustained</td></tr>
+      <tr><td>"Abandoned after N seconds"</td><td>User patience vs. result latency</td><td>Drop in correlated with p95 spikes</td></tr>
+      <tr><td>Parser sentinel rate (fast-flights)</td><td>Schema canary &mdash; catches Google HTML changes early</td><td>Any failures &rarr; page on-call</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Tier 4 &mdash; Price-history backtests</h2>
+  <p>Once <code>price_observations</code> has ~3 months of data (see <a href="caching-and-indexing.html">Caching</a>), the "deal score" and any "wait or book" predictions need their own eval surface.</p>
+  <ul>
+    <li><strong>Walk-forward backtest:</strong> withhold the most recent 30 days. Train / fit the score on data older than that. Predict on the held-out window. Score: ranked correlation of predicted deal-score vs. actual price percentile.</li>
+    <li><strong>Per-route holdout:</strong> top 50 routes, evaluated independently &mdash; a model that nails JFK&ndash;LHR but fails on intra-EU has a coverage problem hidden by a global average.</li>
+    <li><strong>Counterfactual:</strong> for predictions that say "wait", measure outcomes 7 / 14 / 30 days later. False-positive cost (user waited, price rose) is the killer here, not average accuracy.</li>
+  </ul>
+
+  <h2>The hardest part: defining "correct" end-to-end</h2>
+  <p>Cheapness isn&apos;t the only axis. Open-jaw, intermodal, time-of-day preferences, transit-budget tolerance all trade off. A "wrong" top-1 might just be a different valid trade. Three practical disciplines:</p>
+  <ol>
+    <li><strong>Pair an objective metric with a subjective one.</strong> "Found-the-cheapest rate" alongside "LLM-judge top-3 reasonableness". Both drifting the same direction is signal; divergence means the rubric or the ranker is mis-specified.</li>
+    <li><strong>Calibrate the judge.</strong> The LLM judge is itself a model. Hand-grade 10&ndash;15% of the eval set; track judge agreement with human ground truth weekly. If judge accuracy drops, retune the rubric before trusting its verdicts.</li>
+    <li><strong>Surface uncertainty, don&apos;t paper over it.</strong> If two providers disagree on a price, or the ranker is split between two near-identical journeys, log both. Don&apos;t pick a winner just to make the eval green.</li>
+  </ol>
+
+  <div class="callout warn">
+    <span class="label">Anti-pattern</span>
+    Don&apos;t grade end-to-end correctness by re-running the same model that produced the answer. The judge must be a different prompt, different system message, and ideally a different model family. Otherwise you&apos;re grading on a curve.
+  </div>
+
+  <h2>Directory layout</h2>
+  <pre><code>evals/
+  __init__.py
+  conftest.py               # shared fixtures, fake clock, recorded-provider loader
+  fixtures/
+    nlu/
+      simple_round_trip.json
+      open_jaw.json
+      intermodal.json
+      ambiguous_city.json
+    providers/
+      fast_flights/
+        lax_nrt_2026-06-15.html
+        muc_her_2026-07-01.html
+      hafas/
+        muc_fra_2026-06-15.json
+      claude_tools/
+        resolve_location_munich.json
+    fee_kb/
+      snapshot_2026-05-01.json
+  golden/
+    nlu_queries.yaml        # ~50 hand-graded NLU cases
+    e2e_queries.yaml        # ~30 golden end-to-end queries, bucketed
+    judge_calibration.yaml  # ~15 human-graded answers for judge cross-check
+  graders/
+    nlu_grader.py
+    journey_grader.py
+    cost_grader.py
+    rank_grader.py
+    llm_judge.py
+  tier1/                    # CI: pytest, frozen fixtures, &lt; 30s
+    test_nlu.py
+    test_orchestrator.py
+    test_composition.py
+    test_cost_normalizer.py
+    test_ranker.py
+  tier2/                    # nightly: live providers, posts a report
+    run_e2e.py
+    comparators/
+      google_flights.py
+      skyscanner.py
+  tier3/                    # production telemetry &mdash; dashboard configs
+    grafana/
+    alerts.yaml
+  tier4/                    # weekly: walk-forward backtest
+    backtest_deal_score.py
+  reports/                  # generated; gitignored except templates
+    nightly_template.md.j2</code></pre>
+
+  <h2>Sample graders</h2>
+
+  <h3>NLU grader (Tier 1)</h3>
+  <pre><code>from dataclasses import dataclass
+from models import SearchRequest, NeedsClarification
+
+@dataclass
+class NLUCase:
+    query: str
+    expected: SearchRequest | NeedsClarification
+    archetype: str                 # simple | open_jaw | intermodal | ...
+    must_clarify_on: set[str] = ()  # field names that should trigger clarification
+
+def grade_nlu(case: NLUCase, actual) -> dict:
+    structural = isinstance(actual, (SearchRequest, NeedsClarification))
+    if not structural:
+        return {"pass": False, "reason": "invalid output type"}
+
+    # behavior: did it clarify when expected?
+    if case.must_clarify_on:
+        if not isinstance(actual, NeedsClarification):
+            return {"pass": False, "reason": "should have clarified"}
+        return {"pass": actual.field in case.must_clarify_on}
+
+    # semantic: field-by-field match on the structured request
+    diffs = []
+    for field in ("origins", "destinations", "depart", "return_",
+                  "passengers", "cabin", "ground_modes"):
+        if getattr(actual, field) != getattr(case.expected, field):
+            diffs.append(field)
+    return {
+        "pass": not diffs,
+        "diffs": diffs,
+        "archetype": case.archetype,
+    }</code></pre>
+
+  <h3>Ranker grader (Tier 1)</h3>
+  <pre><code>from scipy.stats import kendalltau
+
+def grade_ranking(expected_order: list[str], actual_order: list[str]) -> dict:
+    # Journey IDs only; assumes both lists contain the same set
+    tau, _ = kendalltau(
+        [expected_order.index(j) for j in actual_order],
+        list(range(len(actual_order))),
+    )
+    top3_match = set(expected_order[:3]) == set(actual_order[:3])
+    return {
+        "kendall_tau": tau,
+        "top3_set_match": top3_match,
+        "pass": tau &gt;= 0.7 and top3_match,
+    }</code></pre>
+
+  <h3>LLM judge (Tier 2)</h3>
+  <pre><code>JUDGE_RUBRIC = """
+You are grading a flight-search system's response to a user query.
+Rate the top-3 journeys returned, 1&ndash;5, on each of:
+  - relevance:    does the journey match the user's stated constraints?
+  - cheapness:    is the total cost competitive vs. what's available?
+  - reasonableness: would a knowledgeable travel agent surface this?
+Return strict JSON: {scores: [{relevance, cheapness, reasonableness}, ...],
+                    overall: 1-5, notes: str}
+"""
+
+async def judge_response(query: str, top3, llm: LLMProvider) -> dict:
+    msg = [
+      {"role": "system", "content": JUDGE_RUBRIC},
+      {"role": "user", "content": format_judge_input(query, top3)},
+    ]
+    raw = await llm.structured(msg, schema=JUDGE_SCHEMA)
+    return raw
+
+# Calibration check: re-run judge on the human-graded subset weekly.
+# If agreement with humans drops &gt; 5%, retune rubric before trusting verdicts.</code></pre>
+
+  <h3>Cost grader (Tier 1)</h3>
+  <pre><code>def grade_cost_breakdown(expected: CostBreakdown, actual: CostBreakdown,
+                         tolerance_cents: int = 100) -> dict:
+    diffs = {}
+    for line in ("base_fare", "taxes", "bag_fees", "seat_selection",
+                 "ground_transit", "parking"):
+        exp = getattr(expected, line, 0)
+        act = getattr(actual, line, 0)
+        if abs(exp - act) &gt; tolerance_cents:
+            diffs[line] = {"expected": exp, "actual": act}
+    return {
+        "pass": not diffs,
+        "diffs": diffs,
+        "total_delta_cents": abs(expected.total_usd - actual.total_usd) * 100,
+    }</code></pre>
+
+  <h2>Eval data management</h2>
+  <ul>
+    <li><strong>Fixtures are checked in.</strong> Recorded provider responses live in git so a developer can run Tier 1 offline. Refresh policy: re-record quarterly or whenever a parser changes; keep the old fixture as a regression case.</li>
+    <li><strong>Golden sets are versioned, not edited in place.</strong> Each addition gets a PR with rationale. Hand-grader signs off.</li>
+    <li><strong>PII discipline.</strong> Real user queries don&apos;t enter the eval set without scrubbing names, dates of birth, payment info. Synthesize travel intents; never copy production payloads verbatim.</li>
+    <li><strong>Judge calibration set is sacred.</strong> Hand-graded ground truth for ~15 cases that the judge never sees during training / prompt iteration. If you tune the rubric against this set, it&apos;s no longer a calibration set &mdash; rotate it quarterly.</li>
+  </ul>
+
+  <h2>CI integration</h2>
+  <pre><code># .github/workflows/evals.yml (sketch)
+name: evals
+on: [pull_request, push]
+jobs:
+  tier1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -e .[dev]
+      - run: pytest evals/tier1 -v --junitxml=tier1.xml
+      - run: python evals/report_tier1.py --xml tier1.xml --fail-on-regression
+  tier2-nightly:
+    if: github.event_name == 'schedule'
+    schedule: [{cron: '0 7 * * *'}]   # 07:00 UTC
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python evals/tier2/run_e2e.py --post-report</code></pre>
+  <p>Tier 1 blocks merge. Tier 2 posts to a Slack channel and updates a dashboard but does not block &mdash; live-provider flakiness shouldn&apos;t freeze deployments.</p>
+
+  <h2>What to build first</h2>
+  <ol>
+    <li><strong>Tier 1 NLU evals first.</strong> Highest ROI, smallest blast radius, no provider dependency. Pairs with the NLU work already planned for <a href="roadmap.html">Phase 1</a>.</li>
+    <li><strong>Tier 1 cost-normalizer evals second.</strong> Deterministic, easy to grade exactly, catches a class of error that&apos;s otherwise invisible until users complain.</li>
+    <li><strong>Tier 3 production telemetry next.</strong> Cheap to set up, immediately tells you what&apos;s real. Don&apos;t wait for product-market fit.</li>
+    <li><strong>Tier 1 ranker + composition</strong> when those components stabilize.</li>
+    <li><strong>Tier 2 live e2e</strong> when there&apos;s an orchestrator worth grading end-to-end.</li>
+    <li><strong>Tier 4 backtests</strong> when <code>price_observations</code> has 3+ months of data &mdash; not before.</li>
+  </ol>
+
+  <div class="callout ok">
+    <span class="label">Compounding asset</span>
+    The eval harness is the second-most-valuable artifact this project produces, after the <code>price_observations</code> table. It outlives any single model choice, makes the next LLM swap a config change, and turns "did this PR break anything?" into a question with an answer.
+  </div>
+
+  <h2>Risks worth tracking</h2>
+  <ul>
+    <li><strong>Goodhart on golden sets.</strong> The team optimizes for what&apos;s measured. Rotate fresh queries in monthly; retire ones the system has memorized.</li>
+    <li><strong>Judge drift.</strong> Newer Claude versions may grade the same answer differently. Pin the judge model version; re-calibrate when bumping.</li>
+    <li><strong>Comparator legitimacy.</strong> Scraping Google Flights / Skyscanner for oracle data sits in the same ToS-grey zone as fast-flights. Keep volumes low; this is internal eval traffic, not user-facing.</li>
+    <li><strong>Eval cost creep.</strong> Tier 2 nightly + Tier 4 weekly + LLM-judge calls add up. Budget &lt; $50 / month for v1; revisit at scale.</li>
+  </ul>
+
+  <h2>How this connects to the rest</h2>
+  <ul>
+    <li><a href="nlu-and-llms.html"><strong>NLU &amp; LLMs</strong></a> &mdash; the NLU eval harness sketched there is Tier 1, expanded here with structural + semantic + behavior graders.</li>
+    <li><a href="caching-and-indexing.html"><strong>Caching &amp; Indexing</strong></a> &mdash; <code>price_observations</code> is both the substrate of the system and the substrate of Tier 4 backtests.</li>
+    <li><a href="data-and-providers.html"><strong>Data &amp; Providers</strong></a> &mdash; provider capability flags are exactly what Tier 1 grades against (fall-back paths must be exercised, not just declared).</li>
+    <li><a href="architecture.html"><strong>Architecture</strong></a> &mdash; one eval tier per layer means the architecture&apos;s separation of concerns pays a second dividend.</li>
+  </ul>
+
+  <div class="pager">
+    <a href="monetization-and-reseller.html"><span class="label">Previous</span>Monetization</a>
+    <a href="roadmap.html" class="next"><span class="label">Next</span>Roadmap</a>
+  </div>
+</main>
+</body>
+</html>
