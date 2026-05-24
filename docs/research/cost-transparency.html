@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cost Transparency — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html" class="active">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Cost Transparency</h1>
+  <p class="subtitle">Surface the <em>total</em> cost of a trip up front &mdash; base fare plus bag fees, seat selection, parking, and ground tickets &mdash; so the user knows what's included before they click.</p>
+
+  <h2>The problem</h2>
+  <p>A $284 base fare on a basic-economy ticket can become a $370 trip once a checked bag and seat selection are added. Different airlines bundle differently: Delta Main includes a carry-on; Spirit Bare Fare doesn't. Most search tools quote the lowest unbundled fare and leave the user to discover the truth at checkout.</p>
+  <p>The goal: build a knowledge base of airline ancillary fees, join it to each search result against the user's stated preferences, and rank on the resulting total.</p>
+
+  <h2>The fee knowledge base</h2>
+  <h3>Schema</h3>
+  <pre><code>airline_fee_profile (
+    id              bigserial primary key,
+    airline_code    char(2) not null,
+    fare_brand      text not null,           -- "Basic Economy", "Main Cabin", ...
+    region          text not null,           -- "NA", "EU", "domestic-US", etc.
+    currency        char(3) not null,
+
+    carry_on_included         bool,
+    personal_item_included    bool default true,
+    checked_bag_1_price       numeric(8,2),
+    checked_bag_2_price       numeric(8,2),
+    seat_selection_price_min  numeric(8,2),
+    seat_selection_price_max  numeric(8,2),
+    change_fee                numeric(8,2),
+    cancel_refund_percent     smallint,
+    flight_changes_allowed    bool,
+
+    source_url                text not null,
+    extracted_at              timestamptz not null,
+    extracted_by              text,           -- model id
+    extractor_confidence      numeric(3,2),   -- 0.0&ndash;1.0
+    reviewed_at               timestamptz,
+    notes                     text,
+
+    unique (airline_code, fare_brand, region)
+)</code></pre>
+
+  <h3>Seed coverage</h3>
+  <p>~20 airlines covers the long tail of typical demand. Initial seed by hand or via a one-shot extraction run; ongoing refresh by the weekly worker (below).</p>
+
+  <h2>The fee-extraction worker</h2>
+  <p>Weekly cron, OSS LLM (Llama 3.3 70B or DeepSeek V3 &mdash; see <a href="nlu-and-llms.html">NLU &amp; LLMs</a>).</p>
+  <ol>
+    <li>For each airline, fetch the curated fees-page URL (the airline's own published page; not their booking flow &mdash; that's a different legal posture).</li>
+    <li>Hand the HTML plus the target JSON schema to the model with grammar-constrained decoding. Long context helps; fee pages run ~30k tokens.</li>
+    <li>Parse the structured response. Per-fare-brand rows out.</li>
+    <li><strong>Diff vs prior week.</strong> Flag rows with &gt;20% price changes or new/removed fare brands for manual review.</li>
+    <li>Write to <code>airline_fee_profile</code> with the new <code>extracted_at</code>. Keep history (versioning via insert, not update).</li>
+  </ol>
+
+  <div class="callout">
+    <span class="label">Why offline</span>
+    Batch + reviewable + low quality bar &mdash; the perfect OSS-LLM job. Pages don't change between runs much; one bad extraction has at most a week's blast radius and is correctable by humans before publish.
+  </div>
+
+  <h2>Per-result enrichment</h2>
+  <p>The orchestrator joins each itinerary against the fee KB and the user's <code>PassengerPrefs</code>:</p>
+  <pre><code>def enrich_with_costs(itin: Itinerary, prefs: PassengerPrefs) -> CostBreakdown:
+    breakdown = CostBreakdown(base=itin.base_price)
+
+    for leg in itin.flight_legs:
+        profile = fee_kb.lookup(
+            airline = leg.carrier,
+            fare_brand = leg.fare_brand or _assume_cheapest_brand(leg.carrier),
+            region = _region_of(leg),
+        )
+
+        if prefs.checked_bags &gt;= 1 and not profile.checked_bag_1_price == 0:
+            breakdown.add("Checked bag (&times;1)", profile.checked_bag_1_price)
+        if prefs.checked_bags &gt;= 2:
+            breakdown.add("Checked bag (&times;2)", profile.checked_bag_2_price)
+        if prefs.seat_selection:
+            breakdown.add_range(
+                "Seat selection",
+                profile.seat_selection_price_min,
+                profile.seat_selection_price_max,
+            )
+
+    return breakdown</code></pre>
+
+  <h2>What the user sees</h2>
+  <pre><code>Base fare:                                       $284.00
+Checked bag (&times;1)                                   35.00   (Basic Economy)
+Seat selection                                        12.00   (range $0&ndash;$45)
+&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
+Estimated total                                  $331.00     &#8592; what we rank on
+                                                 Estimate &mdash; basic economy assumed</code></pre>
+
+  <h2>The fare-brand gap</h2>
+  <div class="callout warn">
+    <span class="label">Honesty</span>
+    <code>fast-flights</code> doesn't return fare brand. v1 has to <em>assume</em> the cheapest available brand per airline (usually basic economy) and label totals as "estimated".
+  </div>
+
+  <p>When a provider supplies fare brand (Duffel, Amadeus), the estimate becomes precise automatically because:</p>
+  <ul>
+    <li>The lookup uses the actual brand (<code>itin.fare_brand</code>), not the assumed-cheapest one.</li>
+    <li>Provider-supplied ancillaries (if available) override the KB entirely.</li>
+    <li>The "Estimate &mdash; basic economy assumed" label disappears.</li>
+  </ul>
+
+  <p>Same code path; the difference is just which <code>FlightProvider</code> served the result. This is the payoff for putting cost behind a provider-aware abstraction.</p>
+
+  <h2>Currency and tax visibility</h2>
+  <p>Three things to get right:</p>
+  <ul>
+    <li>Always show prices in the user's selected currency, with an FX rate disclosure when conversion happens.</li>
+    <li>Some rail/bus operators in the EU display pre-tax prices. Normalize to tax-inclusive at the cost layer; mark which legs include tax in the breakdown.</li>
+    <li>US airport parking has resort fees / facility fees not shown in the headline price; the parking source has to provide all-in totals.</li>
+  </ul>
+
+  <h2>Protected intermodal detection</h2>
+  <p>When a journey involves a rail leg into an airport, check the <code>protected_intermodal</code> table:</p>
+  <pre><code>protected_intermodal:
+  - carrier: LH   rail_partner: DB   stations: [FRA, STR, MUC, ...]
+    program: "Lufthansa Express Rail"
+    deep_link_template: "https://www.lufthansa.com/.../rail?..."
+
+  - carrier: AF   rail_partner: SNCF stations: [CDG, ...]
+    program: "TGVAir"
+    deep_link_template: "https://www.airfrance.fr/.../tgvair?..."
+
+  - carrier: KLM  rail_partner: NS   stations: [AMS, ...]
+    program: "KLM &amp; NS"
+
+  - carrier: BA   rail_partner: NR   stations: [LHR, ...]
+    program: "Rail&amp;Fly"</code></pre>
+
+  <p>When the rail leg's destination station and the flight leg's carrier match an entry, the <code>Journey</code> is marked <code>protected: true</code>. The UI surfaces this prominently because it changes the user's risk profile (carrier guarantees the connection; missed-train rebooking is the airline's problem, not the user's).</p>
+
+  <div class="callout ok">
+    <span class="label">UX cue</span>
+    Protected journeys are worth a visual badge and a single combined deep-link to the airline's bookable intermodal flow, rather than two separate booking links (rail + flight).
+  </div>
+
+  <h2>Cost-aware ranking</h2>
+  <p>Once each <code>Journey</code> has a <code>CostBreakdown</code>, the ranker can score on total &mdash; not just headline fare:</p>
+  <pre><code>score = w_price * z(total_cost)
+      + w_time  * z(total_duration)
+      + w_stops * stops_count
+      + w_dep   * penalty(dep_time, prefs.preferred_departure_window)
+      + w_risk  * (0 if protected else self_transfer_risk_score)</code></pre>
+
+  <p>Filters apply before scoring: max stops, dep/arr time windows, max layover length, airlines/alliances allow/deny, max ground portion, carbon ceiling.</p>
+
+  <h2>What's deferred</h2>
+  <ul>
+    <li><strong>Per-route fare rules:</strong> some routes have bag-included promos that override the brand profile. Defer until you have Duffel/Amadeus.</li>
+    <li><strong>Loyalty-program priced ancillaries:</strong> elite-status free bags etc. Defer.</li>
+    <li><strong>Credit-card baggage perks:</strong> "United Explorer card waives first bag." Useful but operationally messy; defer to a later phase with user-input preferences.</li>
+  </ul>
+
+  <div class="pager">
+    <a href="nlu-and-llms.html"><span class="label">Previous</span>NLU &amp; LLMs</a>
+    <a href="ground-transit.html" class="next"><span class="label">Next</span>Ground Transit</a>
+  </div>
+</main>
+</body>
+</html>

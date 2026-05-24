@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ground Transit &amp; Intermodal — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html" class="active">Ground Transit</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Ground Transit &amp; Intermodal</h1>
+  <p class="subtitle">The most operationally complex piece of the system. Multiple modes &times; asymmetric data quality &times; time-sensitive composition.</p>
+
+  <h2>Journey shape</h2>
+  <p>A trip is no longer just a flight:</p>
+  <pre><code>[GroundLeg A &rarr; DEP_n]  +  [FlightLeg DEP_n &rarr; ARR_m]  +  [GroundLeg ARR_m &rarr; B]</code></pre>
+  <p>For a typical search you might evaluate:</p>
+  <ul>
+    <li>3&ndash;8 candidate origin airports &times; 3&ndash;8 candidate arrival airports</li>
+    <li>&times; 2&ndash;4 ground options per side (drive / train / bus / transit)</li>
+    <li>&times; 5&ndash;20 flight options per airport pair</li>
+  </ul>
+  <p>= <strong>thousands of composite journeys</strong> before ranking. The win is ruthless pruning, not exhaustive search.</p>
+
+  <h2>Data sources by mode and region</h2>
+  <table>
+    <thead>
+      <tr><th>Mode / Use</th><th>Source</th><th>Coverage</th><th>API status</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Driving (point &rarr; airport)</td><td>Google Maps Directions</td><td>Global</td><td>Public, key</td><td>Gold standard. Live traffic.</td></tr>
+      <tr><td>Driving</td><td>Mapbox Directions</td><td>Global</td><td>Public</td><td>Cheaper, no transit.</td></tr>
+      <tr><td>Driving</td><td>OSRM / Valhalla / GraphHopper</td><td>Global</td><td>Self-host</td><td>No live traffic. $0 marginal.</td></tr>
+      <tr><td>Local transit (city &rarr; airport)</td><td>Google Maps Transit</td><td>Strong in metros</td><td>Directions API</td><td>Best UX in cities.</td></tr>
+      <tr><td>Local transit</td><td>OpenTripPlanner + GTFS</td><td>Wherever GTFS exists</td><td>Self-host</td><td>~3,000 agency feeds via Mobility Database.</td></tr>
+      <tr><td><strong>Rail (multi-country EU)</strong></td><td><strong>Deutsche Bahn (HAFAS / bahn.de)</strong></td><td><strong>Strong EU incl. cross-border</strong></td><td><strong>Reverse-engineered; semi-official "Open API" exists</strong></td><td><strong>Single best EU rail discovery tool. Real prices, real schedules.</strong></td></tr>
+      <tr><td>Rail</td><td>SNCF Open Data + Trainline</td><td>FR + connections</td><td>Open data free; booking via partner</td><td>Schedules only without partner.</td></tr>
+      <tr><td>Rail</td><td>Trainline Partner API</td><td>UK + EU + select</td><td>Partnership required</td><td>Bookable. Approval can take weeks.</td></tr>
+      <tr><td>Rail</td><td>Amtrak</td><td>US</td><td>No public API</td><td>Skip or scrape via 3rd-party affiliate.</td></tr>
+      <tr><td>Rail</td><td>Renfe / Trenitalia / OBB / SBB</td><td>National</td><td>Each has its own API/auth</td><td>Per-country integration work.</td></tr>
+      <tr><td><strong>Bus</strong></td><td><strong>FlixBus</strong></td><td><strong>EU + expanding US</strong></td><td><strong>Partner API</strong></td><td>FlixBus acquired Greyhound &mdash; real US coverage.</td></tr>
+      <tr><td>Bus</td><td>BusBud</td><td>Global aggregator</td><td>API, partnership</td><td>Commission model.</td></tr>
+      <tr><td>Carpool</td><td>BlaBlaCar</td><td>EU, LATAM</td><td>API limited</td><td>Niche but matters for cheap long ground legs.</td></tr>
+      <tr><td>Ride-hail</td><td>Uber / Lyft estimates</td><td>Global / US</td><td>APIs, getting restricted</td><td>"Drive me, no parking" pricing.</td></tr>
+      <tr><td><strong>Multi-modal discovery</strong></td><td><strong>Rome2Rio</strong></td><td><strong>Global, all modes incl. ferry</strong></td><td><strong>Commercial API, sales-led</strong></td><td>Pragmatic discovery fallback. Estimates only.</td></tr>
+      <tr><td>Multi-modal one-stop</td><td>Omio / GetByBus</td><td>EU strong</td><td>Partnership</td><td>Bookable; EU bias.</td></tr>
+      <tr><td>Airport parking</td><td>SpotHero / ParkWhiz APIs</td><td>Mostly US/EU</td><td>APIs exist</td><td>Easily missed; can add $150&ndash;300 to a "drive" option.</td></tr>
+      <tr><td>Protected intermodal</td><td>LH Express Rail / AF TGVAir / BA Rail&amp;Fly / KLM&amp;NS</td><td>Specific city pairs</td><td>Via GDS / airline</td><td>Carrier guarantees connection. Limited but legally important.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Catchment area &mdash; which airports are even reachable?</h2>
+  <p>Na&iuml;ve radius is wrong everywhere (mountains, water, no roads). Two better options:</p>
+
+  <h3>1. Pre-computed isochrones (recommended for v1)</h3>
+  <ul>
+    <li>For each airport, pre-compute "ground area reachable within T hours" once a quarter using Mapbox Isochrone / Valhalla / OpenRouteService.</li>
+    <li>Store as polygons in Postgres + PostGIS.</li>
+    <li>Query: "which airports' isochrones contain the user's point?" &mdash; millisecond lookup, zero live routing calls.</li>
+  </ul>
+
+  <h3>2. Live routing per candidate</h3>
+  <ul>
+    <li>Pull all airports within <code>radius_max</code> (e.g. 300km).</li>
+    <li>Live-route to each (1&ndash;2s per call). Accurate, expensive.</li>
+  </ul>
+
+  <h3>Hybrid (the actual recommendation)</h3>
+  <p>Isochrone filter to ~5&ndash;10 candidates, then live routing for the survivors.</p>
+
+  <h2>User-controllable catchment knobs</h2>
+  <table>
+    <tbody>
+      <tr><td><code>max_ground_time</code></td><td>Default 2h, intl long-haul 4h</td></tr>
+      <tr><td><code>allowed_modes</code></td><td>{drive, transit, rail, bus}</td></tr>
+      <tr><td><code>has_checked_bags</code></td><td>Kills "3 transfers and a walk" options</td></tr>
+      <tr><td><code>max_ground_cost</code></td><td>Some users won't drive when parking is $300/wk</td></tr>
+      <tr><td><code>willing_to_drive_at_night</code></td><td>Affects early-morning departures</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Multi-airport city groupings</h2>
+  <p>Curated table &mdash; radius-based grouping merges things that shouldn't merge (e.g. JFK vs LGA distance is small but the experience isn't). ~100 city groups covers most demand; maintain by hand.</p>
+  <pre><code>city_groups:
+  NYC &rarr; [JFK, LGA, EWR, HPN, ISP, SWF]
+  LON &rarr; [LHR, LGW, STN, LTN, LCY, SEN]
+  BAY &rarr; [SFO, OAK, SJC]
+  TYO &rarr; [HND, NRT]
+  PAR &rarr; [CDG, ORY, BVA]
+  MIL &rarr; [MXP, LIN, BGY]
+  ROM &rarr; [FCO, CIA]
+  WAS &rarr; [DCA, IAD, BWI]
+  BER &rarr; [BER]              # post-SXF/TXL consolidation
+  ...</code></pre>
+
+  <h2>Composition rules &mdash; encoding what's possible</h2>
+  <div class="callout warn">
+    <span class="label">Critical</span>
+    Without these, the orchestrator surfaces impossible journeys.
+  </div>
+  <table>
+    <thead>
+      <tr><th>Rule</th><th>Default</th><th>Why</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Min ground-arrival-before-flight</td><td>Domestic 90m, intl 120m, low-cost +30m</td><td>Check-in, security, walk to gate</td></tr>
+      <tr><td>Min ground-departure-after-flight</td><td>Domestic 30m, intl 60m, US arrivals 75m</td><td>Deplane, immigration, baggage</td></tr>
+      <tr><td>Last-mile feasibility</td><td>No option ending after airport curfew / no transit after midnight</td><td>Some airports have curfews; some transit doesn't run late</td></tr>
+      <tr><td>First-train compatibility</td><td>Won't suggest 6am flight via train if first train arrives 6:15am</td><td>Common bug</td></tr>
+      <tr><td>Bag-friendliness</td><td>Multi-transfer transit penalized if <code>has_checked_bags=true</code></td><td>UX correctness</td></tr>
+      <tr><td>Risk buffer</td><td>Add +30m on self-transfer rail &rarr; flight</td><td>Train delays propagate to missed flights</td></tr>
+    </tbody>
+  </table>
+
+  <p>Cleanest model: each <code>GroundLeg</code> exposes <code>arrival_uncertainty_minutes</code> (drive: 15, mainline rail: 20, local transit: 10, US Amtrak: 60). Connection valid iff:</p>
+  <pre><code>flight_dep &minus; ground_arrival &ge; min_check_in + arrival_uncertainty</code></pre>
+
+  <h2>Cost composition</h2>
+  <pre><code>Ground out:     Munich Hbf &rarr; MUC, ICE rail        &euro; 32
+Flight:         MUC &rarr; ATH, Lufthansa              &euro;187
+  + 1 checked bag (basic fare)                     &euro; 35
+Ground back:    ATH &rarr; Plaka, X95 bus + metro      &euro; 10
+&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
+Estimated total                                   &euro;264
+Total ground time:  2h 50m   Total trip time: 8h 10m
+Protected connection: &#10007; (self-transfer, 30m buffer included)</code></pre>
+
+  <p>The <strong>protected</strong> flag is critical &mdash; surface it loudly when present (rail-and-fly programs) because it changes user risk.</p>
+
+  <h2>Pruning strategy (so it doesn't explode)</h2>
+  <p>Order matters. Cheapest pruning first:</p>
+  <ol>
+    <li><strong>Isochrone filter</strong> &rarr; candidate airports (no routing calls).</li>
+    <li><strong>Negative cache + route index</strong> &rarr; drop dep/arr pairs with no service (no provider calls).</li>
+    <li><strong>Rough lower-bound flight cost</strong> &rarr; from <code>price_observations</code>, prune pairs where even the historical minimum + cheapest ground &gt; current best total.</li>
+    <li><strong>Live flight queries</strong> in parallel, capped at top-K pairs (e.g. K = 10).</li>
+    <li><strong>Ground routing</strong> in parallel for surviving airports.</li>
+    <li><strong>Composition + ranking.</strong></li>
+  </ol>
+  <p>With this, a typical search is ~10&ndash;15 live provider calls instead of thousands.</p>
+
+  <h2>v1 provider lineup (US + EU, all modes, real prices where API allows)</h2>
+  <h3>Driving / car</h3>
+  <p>Mapbox Directions (US + EU, cheap, traffic-aware enough). Wrap behind <code>DrivingProvider</code>.</p>
+
+  <h3>Local transit (city &harr; airport)</h3>
+  <p>Google Directions Transit mode for both US and EU metros. Best per-city quality without integrating 50 GTFS feeds yourself.</p>
+
+  <h3>Long-distance rail</h3>
+  <ul>
+    <li><strong>EU:</strong> Deutsche Bahn HAFAS (covers DE + cross-border into FR, AT, CH, NL, BE, IT, DK, PL). Single integration unlocks most of EU.</li>
+    <li><strong>EU national gap-fillers:</strong> SNCF open data for FR-internal, Renfe for ES &mdash; v1.5.</li>
+    <li><strong>UK:</strong> National Rail Enquiries (free) for schedules; Trainline partnership for prices later.</li>
+    <li><strong>US:</strong> Skip rail for v1 (Amtrak rarely competitive with flying, no clean API). Revisit.</li>
+  </ul>
+
+  <h3>Long-distance bus</h3>
+  <ul>
+    <li>FlixBus API (US + EU, since they acquired Greyhound).</li>
+    <li>Wanderu as fallback for US routes FlixBus doesn't cover.</li>
+  </ul>
+
+  <h3>Discovery / fallback</h3>
+  <p>Rome2Rio for "is there any way from X to Y" queries when none of the above return results. Used as a discovery API, not the primary source.</p>
+
+  <h2>Protected intermodal detection</h2>
+  <p>Curated rules table:</p>
+  <pre><code>protected_intermodal:
+  - carrier: LH    rail_partner: DB    stations: [FRA, STR, MUC, ...]
+    program: "Lufthansa Express Rail"
+  - carrier: AF    rail_partner: SNCF  stations: [CDG, ...]
+    program: "TGVAir"
+  - carrier: KLM   rail_partner: NS    stations: [AMS, ...]
+    program: "KLM &amp; NS"
+  - carrier: BA    rail_partner: NR    stations: [LHR, ...]
+    program: "Rail&amp;Fly"</code></pre>
+  <p>When the orchestrator composes a journey where rail-leg station + flight-leg carrier match an entry, mark <code>protected: true</code> and produce a single deep-link to the airline's bookable intermodal flow instead of separate links.</p>
+
+  <h2>The <code>TransitProvider</code> interface</h2>
+  <pre><code>class TransitProvider(Protocol):
+    name: str
+    modes: set[Mode]              # {DRIVE, RAIL, BUS, TRANSIT}
+    regions: set[Region]          # {US, EU, GLOBAL}
+    pricing: PricingLevel         # LIVE | ESTIMATE | NONE
+    bookable: bool
+
+    async def route(
+        self,
+        origin: GeoPoint,
+        dest: Airport,
+        when: Datetime,
+        passengers: int,
+        bags: int,
+    ) -> list[GroundOption]: ...
+
+@dataclass
+class GroundOption:
+    mode: Mode
+    legs: list[GroundSegment]        # e.g. [walk, train, transfer, train, walk]
+    depart: Datetime
+    arrive: Datetime
+    price: Money | None
+    pricing_confidence: Live | Estimate | Range
+    arrival_uncertainty_minutes: int
+    bookable: bool
+    booking_url: str | None</code></pre>
+
+  <p>The orchestrator queries providers in <code>pricing</code> priority order &mdash; live first, fall back to estimate only if no live provider covers the corridor.</p>
+
+  <h2>Key operational notes</h2>
+  <h3>HAFAS quirks</h3>
+  <p>DB's HAFAS endpoint isn't formally public. The <code>mobile-api</code> variant is more stable for programmatic use. Several OSS wrappers exist (<code>db-vendo-client</code>, <code>hafas-client</code> in JS, <code>python-hafas-client</code>). Use one; don't roll your own protobuf parsing. Be a good citizen with rate limits &mdash; DB has tolerated this informally for years but can change.</p>
+
+  <h3>Mapbox isochrones</h3>
+  <p>Free tier is 100k requests/month. Pre-computing 200 airports &times; 4 time bands (30/60/90/120 min) &times; 3 modes = 2,400 requests once a quarter. Comfortably free.</p>
+
+  <h3>Google Directions pricing</h3>
+  <p>$5/1k requests for Directions, $10/1k traffic-aware. Budget: ~10 calls/search &times; 1k searches/day = ~$1,500/mo. Significant. Mitigation: cache route shape (postcode &rarr; airport) for 24h since driving routes between popular pairs change little &mdash; reduces calls 5&ndash;10&times;.</p>
+
+  <h3>FlixBus</h3>
+  <p>Partner API is approval-gated but generous. While waiting for approval, you can use their public site's underlying JSON endpoints (same legal posture as fast-flights with Google).</p>
+
+  <h3>Protected-intermodal deep links</h3>
+  <p>Every airline's flow is bespoke. LH lets you select rail+flight together in standard booking; AF TGVAir requires specific landing pages. Document each one and store deep-link templates; revisit when they break.</p>
+
+  <h2>Risks specific to ground transit</h2>
+  <ul>
+    <li><strong>HAFAS access changes:</strong> if DB tightens, EU rail coverage drops to "estimates only". Mitigation: Rome2Rio fallback; design for graceful degradation (pricing &rarr; estimate, not error).</li>
+    <li><strong>Connection-rule wrongness:</strong> getting <code>min_check_in</code> wrong by 30 minutes silently over- or under-promises feasibility. Maintain a per-airport overrides table (LHR T5 transfers, JFK terminal hops, etc.).</li>
+    <li><strong>Protected-intermodal staleness:</strong> airlines add/drop programs quietly. Quarterly manual review of the rules table.</li>
+    <li><strong>Mapbox isochrone &ne; reality:</strong> isochrones don't model time-of-day. Use them only as a candidate filter, never for the displayed ground time &mdash; that always comes from live routing.</li>
+    <li><strong>Parking is sneaky:</strong> a $400 flight + "free" drive can be a $700 trip with 7 days at airport parking. Always include in the breakdown.</li>
+    <li><strong>Edge: ferry-served airports</strong> (parts of Greece/Croatia, Nice region). Rome2Rio handles; self-built does not.</li>
+  </ul>
+
+  <div class="pager">
+    <a href="cost-transparency.html"><span class="label">Previous</span>Cost Transparency</a>
+    <a href="roadmap.html" class="next"><span class="label">Next</span>Roadmap</a>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roadmap &amp; Risks — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="roadmap.html" class="active">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Roadmap &amp; Risks</h1>
+  <p class="subtitle">A phased build that delivers value early and saves the expensive integrations for after the core engine has shape.</p>
+
+  <h2>Phase 0 &mdash; engine (1&ndash;2 weeks)</h2>
+  <ul>
+    <li><code>FlightProvider</code> interface + <code>FastFlightsProvider</code> adapter.</li>
+    <li><code>SearchRequest</code> / <code>Journey</code> / <code>Leg</code> data model.</li>
+    <li>Orchestrator with open-jaw and multi-origin fan-out.</li>
+    <li>Pytest suite with recorded HTML fixtures so tests don't hit Google.</li>
+    <li><code>price_observations</code> append-only logging from day one.</li>
+  </ul>
+
+  <h2>Phase 1 &mdash; NLU &amp; cost (1&ndash;2 weeks)</h2>
+  <ul>
+    <li>Claude Haiku NLU with disambiguation flow and prompt caching.</li>
+    <li>Fee KB schema + initial 20-airline seed (manual or one-shot LLM extraction).</li>
+    <li>Cost-aware ranker with composite scoring.</li>
+    <li>FastAPI endpoints + SSE streaming.</li>
+    <li>NLU eval harness (50 hand-graded queries, CI-gated).</li>
+  </ul>
+
+  <h2>Phase 2 &mdash; ground infrastructure (1 week)</h2>
+  <ul>
+    <li><code>TransitProvider</code> interface + <code>MapboxDrivingProvider</code> + <code>GoogleTransitProvider</code>.</li>
+    <li>Isochrone pre-computation pipeline (~200 airports, one day of compute).</li>
+    <li>Curated <code>city_groups</code> (top 50) + <code>protected_intermodal</code> rules.</li>
+    <li>Connection-validation logic with min-buffer table.</li>
+  </ul>
+
+  <h2>Phase 3 &mdash; rail / bus integration (1&ndash;2 weeks)</h2>
+  <ul>
+    <li><code>DBHafasProvider</code> (biggest single EU rail coverage unlock).</li>
+    <li><code>FlixBusProvider</code> (US + EU bus).</li>
+    <li><code>Rome2RioProvider</code> as discovery fallback.</li>
+    <li>Composition: <code>[Ground, Flight, Ground]</code> journey assembly with connection-rule enforcement.</li>
+  </ul>
+
+  <h2>Phase 4 &mdash; web UI (2&ndash;3 weeks)</h2>
+  <ul>
+    <li>Next.js PWA &mdash; doubles as mobile v0.</li>
+    <li>Chat input with disambiguation prompts inline.</li>
+    <li>Itinerary cards with cost breakdown table, "Protected" badge, deep-link out.</li>
+    <li>Result streaming via SSE (cheapest-so-far while fan-out continues).</li>
+  </ul>
+
+  <h2>Phase 5 &mdash; caching layer (1 week)</h2>
+  <ul>
+    <li>Redis search-result cache with stale-while-revalidate.</li>
+    <li>Negative cache for "no service" results.</li>
+    <li>Route index + nightly schedule cache for top routes.</li>
+  </ul>
+
+  <h2>Phase 6 &mdash; protected intermodal &amp; risk modeling (2 weeks)</h2>
+  <ul>
+    <li>Protected intermodal detection in journey composition.</li>
+    <li>Deep-link generation to LH Express Rail / AF TGVAir / KLM&amp;NS / BA Rail&amp;Fly bookable flows.</li>
+    <li>Initial missed-connection risk score (heuristic for v1, statistical later).</li>
+  </ul>
+
+  <h2>Phase 7 &mdash; mobile + booking (when justified)</h2>
+  <ul>
+    <li>If PWA traction warrants: React Native / Expo wrapper.</li>
+    <li>If booking enters scope: swap one airline to Duffel as a proof; keep <code>fast-flights</code> as fallback discovery.</li>
+    <li>Affiliate partnerships (Trainline, FlixBus, Omio) for bookable ground legs with revenue share.</li>
+  </ul>
+
+  <h2>Total timeline</h2>
+  <p>Phases 0&ndash;6 are roughly <strong>9&ndash;13 weeks</strong> for one engineer working full-time, depending on how clean the HAFAS integration goes and how much UI polish is taken on in Phase 4. Phases 0&ndash;1 (~3 weeks) deliver a working text-in, ranked-results-out engine; Phases 2&ndash;3 (~3 weeks) add the multimodal magic; Phase 4 (~3 weeks) ships a usable product.</p>
+
+  <h2>Decision checkpoints</h2>
+  <table>
+    <thead>
+      <tr><th>Checkpoint</th><th>When</th><th>What to decide</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>fast-flights stable?</td><td>End Phase 0</td><td>Whether to budget for Duffel earlier than planned, based on parser fragility and Google block rates.</td></tr>
+      <tr><td>NLU quality bar met?</td><td>End Phase 1</td><td>If Claude Haiku falls short on disambiguation, escalate to Sonnet for that one call; revisit OSS only above 100k searches/day.</td></tr>
+      <tr><td>HAFAS access granted?</td><td>Mid Phase 3</td><td>If DB tightens unofficially, fall back to Rome2Rio-only EU rail + flag prices as estimates.</td></tr>
+      <tr><td>PWA enough?</td><td>~Week 4 post-launch</td><td>Native wrap only if iOS/Android-specific UX features (push notifications, offline saved trips) are demanded.</td></tr>
+      <tr><td>Price history meaningful?</td><td>~3 months post-launch</td><td>Activate "deal score" feature; consider seeded scrapes at scale.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Risks worth tracking</h2>
+  <h3>External / vendor</h3>
+  <ul>
+    <li><strong>Google blocking fast-flights at scale.</strong> Mitigation: Bright Data already wired, budget for residential proxies. Plan B: Kiwi Tequila free tier for discovery, swap providers without orchestrator changes.</li>
+    <li><strong>HAFAS access changes.</strong> Mitigation: <code>TransitProvider</code> abstraction degrades gracefully to Rome2Rio estimates. Flag pricing confidence to user.</li>
+    <li><strong>Rome2Rio commercial terms shift.</strong> Mitigation: self-built EU coverage (HAFAS + Mapbox + FlixBus) covers the high-value corridors without Rome2Rio.</li>
+    <li><strong>Anthropic pricing / availability.</strong> Mitigation: <code>LLMProvider</code> abstraction, eval harness, configured fallback.</li>
+  </ul>
+
+  <h3>Data quality</h3>
+  <ul>
+    <li><strong>Fare-brand assumption wrongness.</strong> v1 totals are estimates because <code>fast-flights</code> doesn't return brand; basic-economy assumption can over- or under-state by $30&ndash;80/leg. Be loud about this in the UI.</li>
+    <li><strong>Fee KB staleness.</strong> Mitigation: weekly refresh, diff-flagged review.</li>
+    <li><strong>Connection-rule wrongness.</strong> Mitigation: per-airport overrides for the worst offenders; user feedback loop.</li>
+    <li><strong>Protected intermodal program changes.</strong> Mitigation: quarterly review of the rules table.</li>
+  </ul>
+
+  <h3>Operational</h3>
+  <ul>
+    <li><strong>Fan-out latency.</strong> Mitigation: SearchBudget caps, SSE streaming so users see progress, isochrone + route-index pruning.</li>
+    <li><strong>Cost explosion if popular.</strong> Mitigation: Redis SWR cache cuts provider calls 70&ndash;90% on popular routes; cache route shapes 24h for driving directions.</li>
+    <li><strong>Parser regressions.</strong> Mitigation: schema sentinels in the fast-flights parser; daily canary; staged version upgrades.</li>
+  </ul>
+
+  <h3>Legal / commercial</h3>
+  <ul>
+    <li><strong>fast-flights vs Google ToS.</strong> Grey area at low volume; problematic at commercial scale. Migrate to legitimate providers before monetizing aggressively.</li>
+    <li><strong>Direct airline scraping risk.</strong> Avoid entirely; only scrape published <em>fees pages</em> (different posture than booking flows).</li>
+    <li><strong>Booking liability.</strong> Stay deep-link-out for v1. Don't take payments. Booking changes legal posture significantly.</li>
+  </ul>
+
+  <h2>Open questions to revisit</h2>
+  <ul>
+    <li>Do we want a public API once the engine exists? (Affects how strict the request/response schemas need to be.)</li>
+    <li>Loyalty programs &mdash; bag waivers, status perks &mdash; are these v2 or never?</li>
+    <li>Trip planning beyond search: saved searches, price-drop alerts, share-with-companion? Each is a real feature, none are blocking the core.</li>
+    <li>Long-term LLM mix: at what traffic does OSS NLU pay back the eval engineering?</li>
+    <li>Affiliate booking revenue: which integrations to prioritize for revenue share?</li>
+  </ul>
+
+  <h2>Definition of v1 done</h2>
+  <div class="callout ok">
+    <span class="label">v1 ships when</span>
+    A user can type a natural-language query for a complex trip (open-jaw, multi-airport, intermodal, date-flexible), see ranked journey options within a few seconds, with each option showing a total-cost breakdown including bags and ground transit, and click through to bookable destinations (airline / rail operator / FlixBus) directly.
+  </div>
+
+  <div class="pager">
+    <a href="ground-transit.html"><span class="label">Previous</span>Ground Transit</a>
+    <a href="index.html" class="next"><span class="label">Back to</span>Overview</a>
+  </div>
+</main>
+</body>
+</html>

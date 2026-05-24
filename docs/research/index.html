@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Flight Explorer — Research &amp; Design</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html" class="active">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>AI Flight Explorer</h1>
+  <p class="subtitle">Research and design notes for a natural-language flight search tool with complex multi-leg, multi-airport, intermodal, and total-cost-transparent itineraries.</p>
+
+  <h2>The problem in one paragraph</h2>
+  <p>Traditional flight search treats a trip as a single origin airport, a single destination airport, and two dates. Real travel rarely fits that shape. A user near Munich might be willing to take a train up to four hours to reach a cheaper airport, fly into one city, and return from another. They want to compare options across many combinations of departure airports, arrival airports, ground transit, dates, and airlines &mdash; ranked by <em>total</em> cost including bag fees, parking, and ground tickets &mdash; expressed in natural language.</p>
+
+  <h2>What's in scope</h2>
+  <ul>
+    <li><strong>Natural-language input</strong> &mdash; "fly to Crete next month, willing to train up to 4h, return to anywhere in southern Germany"</li>
+    <li><strong>Open-jaw trips</strong> &mdash; arrival city &ne; departure city</li>
+    <li><strong>Multi-origin fan-out</strong> &mdash; consider multiple departure airports near the user</li>
+    <li><strong>Intermodal</strong> &mdash; train or bus to a cheaper airport, then fly</li>
+    <li><strong>Date-flexible</strong> &mdash; &plusmn;N days, cheapest week</li>
+    <li><strong>Total-cost transparency</strong> &mdash; surface bag fees, seat selection, parking, and ground tickets up front</li>
+    <li><strong>Protected intermodal</strong> &mdash; detect rail-as-flight programs (Lufthansa Express Rail, AF TGVAir, etc.) and surface them prominently</li>
+  </ul>
+
+  <h2>Key decisions</h2>
+  <dl class="kv">
+    <dt>Form factor</dt><dd>Web app and mobile (PWA-first; React Native/Expo later)</dd>
+    <dt>Flight data source</dt><dd><code>fast-flights</code> (Google Flights scraper) for v1, with a swappable <code>FlightProvider</code> interface so Duffel/Amadeus/Kiwi can drop in later</dd>
+    <dt>Fee data</dt><dd>LLM-extracted from each airline's published fees page, cached weekly in Postgres</dd>
+    <dt>NLU</dt><dd>Claude Haiku for live parsing/disambiguation; open-source models (Llama&nbsp;3.3 / DeepSeek&nbsp;V3) for the batch fee-extraction worker</dd>
+    <dt>Ground scope</dt><dd>US + EU, all modes (drive / transit / rail / bus)</dd>
+    <dt>Ground pricing</dt><dd>Real prices where APIs allow (DB&nbsp;HAFAS, FlixBus, Google Directions); estimates from Rome2Rio elsewhere</dd>
+    <dt>Protected intermodal</dt><dd>v1 feature: detect and deep-link to airline-bookable combined products</dd>
+    <dt>Booking</dt><dd>Out of scope for v1 &mdash; deep-link to airline / Google Flights</dd>
+  </dl>
+
+  <h2>Document map</h2>
+  <div class="toc">
+    <div class="card">
+      <div class="num">01</div>
+      <a href="architecture.html">System Architecture</a>
+      <p>Layers, provider abstractions, core data types (<code>SearchRequest</code>, <code>Journey</code>, <code>Leg</code>).</p>
+    </div>
+    <div class="card">
+      <div class="num">02</div>
+      <a href="data-and-providers.html">Data &amp; Providers</a>
+      <p>Flight data sourcing, the <code>FlightProvider</code> interface, capability flags, and the path to swap to a GDS.</p>
+    </div>
+    <div class="card">
+      <div class="num">03</div>
+      <a href="caching-and-indexing.html">Caching &amp; Indexing</a>
+      <p>Why full price indexing fails, what's actually worth caching, and how the price-history database compounds into a moat.</p>
+    </div>
+    <div class="card">
+      <div class="num">04</div>
+      <a href="nlu-and-llms.html">NLU &amp; LLM Choices</a>
+      <p>Claude vs open-source models per task, the <code>LLMProvider</code> abstraction, and an eval harness for swapping.</p>
+    </div>
+    <div class="card">
+      <div class="num">05</div>
+      <a href="cost-transparency.html">Cost Transparency</a>
+      <p>The airline-fee knowledge base, the LLM extraction worker, and per-result cost breakdowns.</p>
+    </div>
+    <div class="card">
+      <div class="num">06</div>
+      <a href="ground-transit.html">Ground Transit &amp; Intermodal</a>
+      <p>Catchment areas, multi-airport groupings, ground providers per region, connection rules, and protected intermodal.</p>
+    </div>
+    <div class="card">
+      <div class="num">07</div>
+      <a href="roadmap.html">Roadmap &amp; Risks</a>
+      <p>Phased rollout, milestones, and the risks worth tracking.</p>
+    </div>
+  </div>
+
+  <h2>Reading order</h2>
+  <p>If you're new to the design, read in number order: Architecture &rarr; Data &amp; Providers &rarr; Caching gives the engine; NLU &amp; Cost give the user-facing magic; Ground Transit is the most operationally complex section; Roadmap ties it all to a build plan.</p>
+
+  <footer>Research notes &middot; AI Flight Explorer</footer>
+</main>
+</body>
+</html>

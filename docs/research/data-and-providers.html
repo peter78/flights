@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data &amp; Providers — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html" class="active">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Flight Data &amp; Providers</h1>
+  <p class="subtitle">Start with <code>fast-flights</code>; architect so any GDS, aggregator, or future scraper can drop in without touching the orchestrator.</p>
+
+  <h2>The decision</h2>
+  <p>Use <code>fast-flights</code> as the v1 flight provider. Wrap every external dependency behind a <code>FlightProvider</code> protocol so providers are swappable per-deployment and per-request.</p>
+  <div class="callout">
+    <span class="label">Why</span>
+    fast-flights is free, already integrated, and supports multi-city queries (open-jaw, multi-leg). Booking APIs (Duffel, Amadeus) give better fare-brand and ancillary data but cost money, require partnerships, and aren't necessary until booking enters scope.
+  </div>
+
+  <h2>Flight data sources compared</h2>
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Type</th><th>Strengths</th><th>Weaknesses</th><th>Cost</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>fast-flights</strong></td>
+        <td>Google Flights scraper</td>
+        <td>Free, no key, broad airline coverage, supports open-jaw / multi-city</td>
+        <td>ToS-grey; fragile to UI changes; no fare brand; no ancillaries; rate-limited at scale</td>
+        <td>$0 + optional proxy</td>
+      </tr>
+      <tr>
+        <td><strong>Duffel</strong></td>
+        <td>NDC aggregator + booking</td>
+        <td>Real fare brands, real ancillaries, real booking, clean API</td>
+        <td>Carrier coverage is curated (~50 airlines); markups; partnership process</td>
+        <td>Per-booking revenue share</td>
+      </tr>
+      <tr>
+        <td><strong>Amadeus Self-Service</strong></td>
+        <td>GDS API</td>
+        <td>Broadest schedule data; mature; supports complex itineraries</td>
+        <td>Pricing per call gets expensive at scale; UI/UX overhead; legacy data shapes</td>
+        <td>Free tier &rarr; pay per call</td>
+      </tr>
+      <tr>
+        <td><strong>Kiwi.com Tequila</strong></td>
+        <td>Aggregator + virtual interlining</td>
+        <td>Self-transfer combos others miss; free tier; good for budget travelers</td>
+        <td>Virtual interlining adds missed-connection risk; partner approval for higher tier</td>
+        <td>Free tier; revenue share</td>
+      </tr>
+      <tr>
+        <td><strong>Skyscanner B2B</strong></td>
+        <td>Meta aggregator</td>
+        <td>Comprehensive deep-link results</td>
+        <td>Partner-only access; commercial terms</td>
+        <td>Partnership</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Provider abstraction</h2>
+  <pre><code>class FlightProvider(Protocol):
+    name: str
+    capability: ProviderCapability
+
+    async def search(
+        self,
+        req: SearchRequest,
+        budget: SearchBudget,
+    ) -> AsyncIterator[Itinerary]: ...
+
+    async def get_fare_rules(
+        self,
+        itinerary: Itinerary,
+    ) -> FareRules | None: ...
+
+    async def deep_link(
+        self,
+        itinerary: Itinerary,
+    ) -> str: ...
+
+@dataclass
+class ProviderCapability:
+    regions: set[Region]
+    supports_open_jaw: bool
+    supports_multi_city: bool
+    returns_fare_brand: bool
+    returns_ancillaries: bool
+    bookable: bool
+    typical_latency_ms: int
+    rate_limit_per_minute: int | None</code></pre>
+
+  <p>Each adapter is responsible for translating the universal <code>SearchRequest</code> into its own request shape and normalizing results into <code>Itinerary</code>/<code>FlightLeg</code>. The orchestrator never sees a provider-specific type.</p>
+
+  <h2>The <code>FastFlightsProvider</code> adapter</h2>
+  <pre><code>class FastFlightsProvider:
+    name = "fast-flights"
+    capability = ProviderCapability(
+        regions={Region.GLOBAL},
+        supports_open_jaw=True,        # multi-city query type
+        supports_multi_city=True,
+        returns_fare_brand=False,      # forces estimate-mode cost
+        returns_ancillaries=False,
+        bookable=False,
+        typical_latency_ms=4000,
+        rate_limit_per_minute=None,    # Google's, not declared
+    )
+
+    async def search(self, req, budget):
+        # 1. Translate SearchRequest -&gt; fast_flights.Query
+        # 2. Call get_flights() via primp client (or Bright Data integration
+        #    when configured)
+        # 3. Parse and normalize each result into Itinerary
+        # 4. Yield as they're ready</code></pre>
+
+  <h2>Choosing providers at request time</h2>
+  <p>Multiple providers can run in parallel; the orchestrator dedupes results by <code>(carrier, flight_number, date, price)</code>. Capability flags decide eligibility:</p>
+  <ul>
+    <li>If <code>SearchRequest.is_open_jaw</code>, drop providers without <code>supports_open_jaw</code> from the candidate set.</li>
+    <li>If user requested <code>bookable_only</code>, drop providers with <code>bookable=False</code>.</li>
+    <li>If <code>SearchRequest.region</code> doesn't intersect <code>capability.regions</code>, skip.</li>
+  </ul>
+
+  <h2>The swap path</h2>
+  <p>Three swaps that should be a configuration change, not a refactor:</p>
+  <ol>
+    <li><strong>fast-flights &rarr; Duffel</strong> when booking enters scope. The adapter's <code>search()</code> + <code>deep_link()</code> change; downstream code doesn't. Fare-brand-aware cost breakdowns activate automatically because <code>returns_fare_brand</code> flips to <code>true</code>.</li>
+    <li><strong>fast-flights &rarr; Kiwi.com Tequila</strong> for users opting into self-transfer / hidden-city options. Run as a parallel provider; results carry a <code>virtual_interlining=True</code> flag.</li>
+    <li><strong>Bright Data proxy on/off</strong> per request. Already integrated in <code>fast_flights</code>; expose as a feature flag for users on flaky regions.</li>
+  </ol>
+
+  <h2>Result normalization</h2>
+  <p>fast-flights returns its own <code>Flights</code>/<code>SingleFlight</code> shapes. The adapter maps each into the universal types:</p>
+  <table>
+    <thead>
+      <tr><th>fast-flights field</th><th>Maps to</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Flights.price</code></td><td><code>Itinerary.base_price</code></td><td>Includes carrier-listed base; not ancillaries</td></tr>
+      <tr><td><code>Flights.airlines</code></td><td><code>Itinerary.marketing_carriers</code></td><td>Resolve to <code>Airline</code> records via metadata</td></tr>
+      <tr><td><code>SingleFlight.from_airport / to_airport</code></td><td><code>FlightLeg.from_airport / to_airport</code></td><td>Already IATA-coded</td></tr>
+      <tr><td><code>SingleFlight.departure / arrival</code></td><td><code>FlightLeg.depart / arrive</code></td><td>Convert <code>SimpleDatetime</code> &rarr; <code>Datetime</code></td></tr>
+      <tr><td><code>SingleFlight.duration</code></td><td><code>FlightLeg.duration_minutes</code></td><td>Direct</td></tr>
+      <tr><td><code>Flights.carbon</code></td><td><code>Itinerary.carbon</code></td><td>Display only; not ranked unless user opts in</td></tr>
+      <tr><td>&mdash;</td><td><code>Itinerary.fare_brand</code></td><td>Always <code>None</code> from this provider</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Operational concerns with <code>fast-flights</code></h2>
+  <div class="callout warn">
+    <span class="label">Watch</span>
+    Three failure modes to plan for from day one.
+  </div>
+  <h3>1. Google rate-limits / blocks</h3>
+  <p>At any meaningful traffic, Google will start rate-limiting from a single IP. Bright Data is already wired in (<code>fast_flights/integrations/bright_data.py</code>). Plan: enable Bright Data by default for production; allow a "direct" mode in dev. Budget: residential proxy traffic is the main marginal cost.</p>
+
+  <h3>2. UI changes break the parser</h3>
+  <p>The parser pulls fields out of a JS-embedded payload by array index (see <code>fast_flights/parser.py</code>). Index drift = silent breakage. Mitigations:</p>
+  <ul>
+    <li>Schema sentinels: assert known-shape invariants (number of fields, type of <code>price</code>) and raise loudly on mismatch.</li>
+    <li>Daily canary search against a fixed query; alert on schema mismatch or zero results.</li>
+    <li>Pinned <code>fast-flights</code> version per deploy; staged upgrades.</li>
+  </ul>
+
+  <h3>3. Fan-out amplifies fragility</h3>
+  <p>Multi-origin search means N parallel Google requests per user search. Each is a chance to fail or get throttled. Mitigations:</p>
+  <ul>
+    <li>Per-provider circuit breaker: after K failures in 60s, mark unhealthy for M minutes, return cached + estimated.</li>
+    <li>Per-search retry budget (e.g. 2 retries, then drop that candidate from the result set rather than failing the whole search).</li>
+    <li>Use stale cache + SWR (see <a href="caching-and-indexing.html">Caching</a>) to keep results coming even when providers are flapping.</li>
+  </ul>
+
+  <h2>Reference data</h2>
+  <p>Two static datasets the providers all share:</p>
+  <ul>
+    <li><code>airports.csv</code> (already in <code>enums/</code>) &mdash; IATA + ICAO + lat/lon + city + country. Extended with served-by-rail station code, time-zone, and "primary" boolean for the city-group resolver.</li>
+    <li><code>airlines.json</code> &mdash; carrier code, name, alliance, fare-class profile reference. Populated by the airline-fee KB worker (see <a href="cost-transparency.html">Cost Transparency</a>).</li>
+  </ul>
+
+  <div class="pager">
+    <a href="architecture.html"><span class="label">Previous</span>Architecture</a>
+    <a href="caching-and-indexing.html" class="next"><span class="label">Next</span>Caching &amp; Indexing</a>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NLU &amp; LLM Choices — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html" class="active">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>NLU &amp; LLM Choices</h1>
+  <p class="subtitle">Three LLM jobs with different quality bars and cost profiles. Claude for live NLU, open-source for batch fee extraction, swappable behind a single interface.</p>
+
+  <h2>The three LLM tasks</h2>
+  <table>
+    <thead>
+      <tr><th>Task</th><th>Volume</th><th>Quality bar</th><th>Latency need</th><th>OSS verdict</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>NLU</strong> &mdash; parse "fly to Tokyo first week of June, train to FRA OK" &rarr; <code>SearchRequest</code> with tool-use + disambiguation</td>
+        <td>1&ndash;2 calls / user search</td>
+        <td>High &mdash; silent wrong answers ruin trust</td>
+        <td>Interactive (&lt;2s)</td>
+        <td>OSS can match with effort; Claude is cheaper to ship</td>
+      </tr>
+      <tr>
+        <td><strong>Fee extraction</strong> &mdash; airline fees-page HTML &rarr; structured JSON</td>
+        <td>~20&ndash;50 pages / week, offline</td>
+        <td>Medium &mdash; diffable, reviewable</td>
+        <td>Batch, minutes&ndash;hours fine</td>
+        <td>Clearly fine; big cost win</td>
+      </tr>
+      <tr>
+        <td><strong>Result summarization</strong> &mdash; render itineraries in natural language</td>
+        <td>Per user search</td>
+        <td>Low &mdash; nice-to-have polish</td>
+        <td>Streaming OK</td>
+        <td>Any modern OSS works</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>The NLU layer (Claude tool-use)</h2>
+  <p>One model call per user message. The model has tools, not freeform output:</p>
+  <pre><code>tools = [
+  {
+    "name": "resolve_location",
+    "description": "Resolve a free-text place to airports or a region.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string"},
+        "context": {"enum": ["origin", "destination"]}
+      }
+    }
+  },
+  {
+    "name": "resolve_dates",
+    "description": "Resolve free-text dates relative to today.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text":  {"type": "string"},
+        "today": {"type": "string", "format": "date"}
+      }
+    }
+  },
+  {
+    "name": "submit_search",
+    "description": "Terminal tool. Hands off the structured request.",
+    "input_schema": SearchRequest.json_schema()
+  },
+  {
+    "name": "needs_clarification",
+    "description": "Ask the user a disambiguation question.",
+    "input_schema": ClarificationRequest.json_schema()
+  }
+]</code></pre>
+
+  <h3>Disambiguation flow</h3>
+  <p>If location or date resolution is ambiguous (multiple plausible cities, vague "next weekend"), the model calls <code>needs_clarification</code> instead of <code>submit_search</code>. The API returns the question to the client; the client posts the answer back to <code>POST /clarify</code> and the model continues. Avoids guessing wrong silently.</p>
+
+  <h3>Prompt caching</h3>
+  <p>The system prompt + airport reference data is shared across calls. Anthropic prompt caching cuts input cost ~90% on cached portions &mdash; significant for a stable, large context.</p>
+
+  <h2>Open-source contenders for NLU</h2>
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Strengths</th><th>Weaknesses</th><th>Hosting</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Llama 3.3 70B Instruct</strong></td>
+        <td>Solid tool calling; available everywhere; safe default</td>
+        <td>Place-name reasoning for non-English/regional names trails Claude</td>
+        <td>Together / Fireworks / Groq / DeepInfra; ~$0.50&ndash;$0.90 per M tokens</td>
+      </tr>
+      <tr>
+        <td><strong>Qwen 2.5 72B Instruct</strong></td>
+        <td>Strongest on multilingual reasoning; better non-English place names</td>
+        <td>Tool-use schema following sometimes wanders</td>
+        <td>Same providers</td>
+      </tr>
+      <tr>
+        <td><strong>DeepSeek V3</strong></td>
+        <td>Frontier-class output; very cheap via DeepSeek's own API; good structured output</td>
+        <td>Data residency consideration (PRC-hosted by default)</td>
+        <td>DeepSeek API ~$0.27/M in, $1.10/M out; cached input $0.07/M</td>
+      </tr>
+      <tr>
+        <td><strong>Mistral Large 2</strong></td>
+        <td>Good tool-use; EU-hosted option matters for some users</td>
+        <td>Less open than the others; pricing closer to commercial models</td>
+        <td>Mistral La Plateforme; EU regions</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <span class="label">Tip</span>
+    All of these support grammar-constrained / JSON-schema-constrained decoding (via vLLM, outlines, llama.cpp), which closes most of the structured-output gap with Claude for free.
+  </div>
+
+  <h2>Where the real gap shows up</h2>
+  <p>Try this prompt on each:</p>
+  <blockquote style="border-left: 3px solid var(--border); margin: 1rem 0; padding-left: 1rem; color: var(--muted);">
+    "Fly from somewhere near Munich to Crete next month, prefer morning departures, willing to take a train up to 4 hours to get to a cheaper airport, returning to anywhere in southern Germany."
+  </blockquote>
+  <p>The gap shows in three places:</p>
+  <ul>
+    <li><strong>Geographic reasoning:</strong> "near Munich" &rarr; which airports? "southern Germany" &rarr; MUC, STR, NUE, FMM, MEM? OSS models often miss secondary airports.</li>
+    <li><strong>Constraint juggling:</strong> 4 simultaneous constraints (origin region, dest, time, transit budget). OSS more often drops one silently.</li>
+    <li><strong>Tool-use chaining:</strong> <code>resolve_location</code> &rarr; <code>resolve_dates</code> &rarr; <code>submit_search</code>. OSS more likely to skip a step or hallucinate arguments.</li>
+  </ul>
+  <p>You can close this with prompting + constrained decoding + evals, but it's real work. Budget <strong>2&ndash;4 weeks of eval and prompt iteration</strong> to match Claude on this task, plus a regression harness to keep it there.</p>
+
+  <h2>Cost at v1 scale</h2>
+  <p>At ~1k searches/day, ~1.5k LLM calls/day, ~500k tokens/day:</p>
+  <table>
+    <thead>
+      <tr><th>Setup</th><th>NLU cost / month</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Claude Haiku 4.5</td><td><strong>~$15</strong></td></tr>
+      <tr><td>Claude Sonnet 4.6</td><td>~$60</td></tr>
+      <tr><td>Llama 3.3 70B (Together)</td><td>~$13</td></tr>
+      <tr><td>DeepSeek V3</td><td>~$8</td></tr>
+      <tr><td>Self-hosted L3.3 70B on rented H100</td><td>~$1,400 (idle cost dominates)</td></tr>
+    </tbody>
+  </table>
+  <p>At v1 volume, you save $5&ndash;10/month by going OSS for NLU. Not worth the eval engineering unless you have other reasons (data residency, offline use, no-vendor-lock-in principle). The math flips around <strong>~100k searches/day</strong>: OSS hosted inference saves real money and self-hosting starts to make sense.</p>
+
+  <h2>The hybrid recommendation</h2>
+  <ol>
+    <li><strong>NLU &rarr; Claude Haiku 4.5</strong> with prompt caching on the system prompt + airport reference data. Cheap, best-in-class disambiguation, ship faster. Revisit when volume justifies the swap.</li>
+    <li><strong>Fee extraction worker &rarr; Llama 3.3 70B via Together</strong> or DeepSeek V3. Batch, offline, easy schema, low risk. Genuine cost win because pages are long (~30k tokens each).</li>
+    <li><strong>Result summarization &rarr; whatever you've already integrated</strong>. Even an 8B model works. Easiest to keep on the same provider as fee extraction.</li>
+    <li><strong>Wrap all three in an <code>LLMProvider</code></strong> &mdash; swapping is a config change.</li>
+  </ol>
+
+  <h2>The <code>LLMProvider</code> interface</h2>
+  <pre><code>class LLMProvider(Protocol):
+    name: str
+    supports_cached_prompt: bool
+    supports_json_schema: bool
+    supports_tool_use: bool
+
+    async def complete(
+        self,
+        messages: list[Message],
+        *,
+        cache_breakpoints: list[int] | None = None,
+        max_tokens: int = 1024,
+    ) -> Response: ...
+
+    async def call_tools(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        *,
+        force_tool: str | None = None,
+    ) -> ToolCalls: ...
+
+    async def structured(
+        self,
+        messages: list[Message],
+        schema: JsonSchema,
+    ) -> dict: ...</code></pre>
+
+  <h2>Eval harness (mandatory if going OSS for NLU)</h2>
+  <p>You can't quietly swap LLMs without a regression harness. Build one with the project; you'll use it forever.</p>
+  <ul>
+    <li><strong>~50&ndash;100 hand-graded NLU queries</strong> covering: open-jaw, fuzzy dates, ambiguous cities, multi-constraint queries, error cases.</li>
+    <li><strong>Per-query graders:</strong> structural (did it produce a valid <code>SearchRequest</code>?), semantic (does the request match what a human would have asked?), behavior (did it ask for clarification when it should have?).</li>
+    <li><strong>Replay test:</strong> run the harness on every prompt change. Fail CI if accuracy drops &gt;3% on any category.</li>
+    <li><strong>Fallback escape hatch:</strong> if the configured provider returns low confidence (or a malformed tool call), retry with Claude. Users get correct answers while you tune.</li>
+  </ul>
+
+  <div class="callout ok">
+    <span class="label">Practical note</span>
+    The eval harness pays for itself on the second LLM swap regardless of which providers you choose. Even staying on Claude, you'll want it for prompt regressions and model version bumps.
+  </div>
+
+  <h2>Privacy / data-residency considerations</h2>
+  <p>User queries can contain personal travel details. If that matters:</p>
+  <ul>
+    <li>Anthropic offers AWS Bedrock / GCP Vertex hosting with regional data residency.</li>
+    <li>OSS via Together/Fireworks has US-only inference by default; EU options exist.</li>
+    <li>Self-hosted Llama on your own infra is the only path to <em>fully</em> in-VPC inference. ~$1,400/month minimum.</li>
+  </ul>
+
+  <div class="pager">
+    <a href="caching-and-indexing.html"><span class="label">Previous</span>Caching &amp; Indexing</a>
+    <a href="cost-transparency.html" class="next"><span class="label">Next</span>Cost Transparency</a>
+  </div>
+</main>
+</body>
+</html>

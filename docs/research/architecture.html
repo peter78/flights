@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>System Architecture — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html" class="active">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>System Architecture</h1>
+  <p class="subtitle">A layered design that keeps every external dependency &mdash; flight data, ground transit, LLMs, fees &mdash; behind a swappable interface.</p>
+
+  <h2>High-level diagram</h2>
+  <div class="diagram"> &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+ &#9474;     Clients: Next.js web app + React Native (Expo) or PWA           &#9474;
+ &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                              &#9474; REST + SSE
+ &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+ &#9474;  FastAPI backend                                                   &#9474;
+ &#9474;                                                                    &#9474;
+ &#9474;  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;             &#9474;
+ &#9474;  &#9474; NLU    &#9474; &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9474;Search       &#9474; &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9474;Cost normalizer &#9474;             &#9474;
+ &#9474;  &#9474;(Claude)&#9474;      &#9474;orchestrator &#9474;      &#9474;+ ranker/filters&#9474;             &#9474;
+ &#9474;  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;             &#9474;
+ &#9474;                                                                    &#9474;
+ &#9474;  Provider interfaces:  FlightProvider  TransitProvider  LLMProvider &#9474;
+ &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+              &#9474;                                       &#9474;
+   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+   &#9474; Adapters (swappable): &#9474;                  &#9474; Background      &#9474;
+   &#9474;   FastFlightsProvider  &#9474;                 &#9474; worker:         &#9474;
+   &#9474;   DuffelProvider       &#9474;                 &#9474; LLM-extract     &#9474;
+   &#9474;   AmadeusProvider      &#9474;                 &#9474; airline fee     &#9474;
+   &#9474;   MapboxDrivingProv.   &#9474;                 &#9474; pages weekly    &#9474;
+   &#9474;   GoogleTransitProv.   &#9474;                 &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+   &#9474;   DBHafasProvider      &#9474;
+   &#9474;   FlixBusProvider      &#9474;
+   &#9474;   Rome2RioProvider     &#9474;
+   &#9474;   ClaudeLLMProvider    &#9474;
+   &#9474;   LlamaLLMProvider     &#9474;
+   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
+
+  <h2>Layers</h2>
+  <h3>Clients</h3>
+  <p>PWA-first Next.js web app that doubles as the mobile experience until traction justifies wrapping in React Native / Expo. Streaming results (SSE) so the user sees cheapest-so-far while fan-out continues in the background.</p>
+
+  <h3>API surface</h3>
+  <p>FastAPI for async fan-out across providers. Two main endpoints:</p>
+  <ul>
+    <li><code>POST /search</code> &mdash; takes either a structured <code>SearchRequest</code> or a free-text query; streams <code>Journey</code> results as they arrive.</li>
+    <li><code>POST /clarify</code> &mdash; when NLU returns <code>needs_clarification</code> (ambiguous city, vague date), this endpoint accepts the user's selection and continues.</li>
+  </ul>
+
+  <h3>NLU</h3>
+  <p>One Claude call per user message, with structured tool-use, returning either a <code>SearchRequest</code> or a <code>NeedsClarification</code>. See <a href="nlu-and-llms.html">NLU &amp; LLMs</a>.</p>
+
+  <h3>Search orchestrator</h3>
+  <p>The hardest layer. Takes a <code>SearchRequest</code> with possibly many origin and arrival candidates, ground-transit windows, and date flex; coordinates parallel calls across providers; composes ground + flight + ground legs into full <code>Journey</code>s; applies a <code>SearchBudget</code> to bound cost and latency.</p>
+
+  <h3>Cost normalizer + ranker</h3>
+  <p>Joins each itinerary against the fee KB and the user's preferences, produces a <code>CostBreakdown</code>, ranks by a composite score with user-tunable weights.</p>
+
+  <h3>Provider interfaces</h3>
+  <p>Three protocols. Every external dependency lives behind one of them.</p>
+
+  <h2>Core data types</h2>
+  <pre><code>SearchRequest:
+  origins:          list[GeoPoint | Airport | CityGroup]
+  destinations:     list[GeoPoint | Airport | CityGroup]
+  depart:           DateRange       # supports flex
+  return:           DateRange | None
+  passengers:       Passengers
+  cabin:            Cabin
+  prefs:            PassengerPrefs  # bags, seat selection, max layover, etc.
+  ground_modes:     set[Mode]       # {DRIVE, RAIL, BUS, TRANSIT}
+  max_ground_time:  Duration        # default 2h
+  budget_cap_usd:   int | None
+  weights:          RankWeights     # price/duration/stops/etc.
+
+Journey:
+  legs:             list[Leg]       # alternating Ground/Flight/Ground
+  total_cost:       Money
+  total_duration:   Duration
+  cost_breakdown:   CostBreakdown
+  protected:        bool            # rail-as-flight program
+  pricing_confidence: Live | Estimate | Range
+  deep_links:       list[BookingLink]
+
+Leg = FlightLeg | GroundLeg
+
+FlightLeg:
+  carrier: Airline
+  flight_number: str
+  from_airport, to_airport: Airport
+  depart, arrive: Datetime
+  fare_brand: str | None          # populated when provider supports it
+  ancillaries_applied: list[Ancillary]
+
+GroundLeg:
+  mode: Mode
+  from_point, to_point: Place
+  depart, arrive: Datetime
+  carrier: str | None             # e.g. "DB ICE 1051", "FlixBus N1722"
+  price: Money | None
+  arrival_uncertainty_minutes: int
+  bookable: bool</code></pre>
+
+  <h2>Provider protocols</h2>
+  <pre><code>class FlightProvider(Protocol):
+    capability: ProviderCapability
+    async def search(self, req: SearchRequest) -> list[FlightLeg | Itinerary]: ...
+    async def get_fare_rules(self, itin) -> FareRules | None: ...
+
+class TransitProvider(Protocol):
+    modes: set[Mode]
+    regions: set[Region]
+    pricing: Live | Estimate | None
+    bookable: bool
+    async def route(self, origin: GeoPoint, dest: Airport,
+                    when: Datetime, passengers: int, bags: int
+                   ) -> list[GroundOption]: ...
+
+class LLMProvider(Protocol):
+    async def complete(self, messages, tools=None) -> Response: ...
+    async def call_tools(self, messages, tools) -> ToolCalls: ...
+    supports_cached_prompt: bool
+    supports_json_schema: bool</code></pre>
+
+  <h2>Provider capability flags</h2>
+  <p>Capabilities are introspected at startup so the orchestrator can route work to the right provider without per-provider conditionals downstream.</p>
+  <table>
+    <thead>
+      <tr><th>Capability</th><th>Why it matters</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>supports_open_jaw</code></td><td>Orchestrator falls back to two one-ways if false.</td></tr>
+      <tr><td><code>supports_multi_city</code></td><td>Three-or-more-leg trips can be sent as one query.</td></tr>
+      <tr><td><code>returns_fare_brand</code></td><td>If true, cost normalizer uses real brand rules; if false, falls back to assumed-cheapest-brand fee profile.</td></tr>
+      <tr><td><code>returns_ancillaries</code></td><td>If true, skip fee KB lookup and use provider data.</td></tr>
+      <tr><td><code>bookable</code></td><td>Drives the deep-link vs. checkout decision.</td></tr>
+      <tr><td><code>region</code> set</td><td>Orchestrator picks providers by geographic coverage.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Request lifecycle</h2>
+  <ol>
+    <li>Client sends free-text or structured query to <code>POST /search</code>.</li>
+    <li>NLU resolves to <code>SearchRequest</code> (or returns <code>needs_clarification</code>).</li>
+    <li>Orchestrator expands the request into a search plan: candidate airport pairs, date matrix, ground-mode candidates. Applies <code>SearchBudget</code>.</li>
+    <li>Pruning passes (isochrone, negative cache, historical price floor) drop dominated combinations.</li>
+    <li>Parallel fan-out across <code>FlightProvider</code>s and <code>TransitProvider</code>s.</li>
+    <li>Composition pass assembles full <code>Journey</code>s, enforces connection rules.</li>
+    <li>Cost normalizer attaches breakdowns; ranker scores.</li>
+    <li>Top-K stream out via SSE; remaining results trickle in.</li>
+    <li>Each result is also written to <code>price_observations</code> for the history database.</li>
+  </ol>
+
+  <div class="pager">
+    <a href="index.html"><span class="label">Previous</span>Overview</a>
+    <a href="data-and-providers.html" class="next"><span class="label">Next</span>Data &amp; Providers</a>
+  </div>
+</main>
+</body>
+</html>

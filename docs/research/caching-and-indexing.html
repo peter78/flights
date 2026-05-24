@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caching &amp; Indexing — AI Flight Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top">
+  <span class="brand">AI Flight Explorer</span>
+  <a href="index.html">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="data-and-providers.html">Data &amp; Providers</a>
+  <a href="caching-and-indexing.html" class="active">Caching</a>
+  <a href="nlu-and-llms.html">NLU &amp; LLMs</a>
+  <a href="cost-transparency.html">Cost</a>
+  <a href="ground-transit.html">Ground Transit</a>
+  <a href="roadmap.html">Roadmap</a>
+</nav>
+
+<main>
+  <h1>Caching &amp; Indexing</h1>
+  <p class="subtitle">Full pre-indexing of prices doesn't work. Layered caching plus a price-history database does &mdash; and the price history compounds into a moat.</p>
+
+  <h2>Why "index everything" fails for prices</h2>
+  <ul>
+    <li><strong>Combinatorial:</strong> ~500 popular airports &times; 500 = 250k pairs &times; 365 days &times; 4 cabins &asymp; <strong>180M queries</strong> per refresh cycle. At ~1 req/s through a scraper, that's years.</li>
+    <li><strong>Volatility:</strong> airline revenue-management systems reprice every few minutes. A 1-hour-old cached price is often wrong; a 24-hour-old one is misleading enough to break user trust the first time they click through.</li>
+    <li><strong>Inventory:</strong> even when a price holds, the seat may be gone. You'd be advertising offers that don't exist.</li>
+    <li><strong>Long tail:</strong> 80% of searches hit common routes, but the other 20% are exactly the ones the user actually needs answered.</li>
+  </ul>
+
+  <div class="callout">
+    <span class="label">Reframe</span>
+    The question isn't "cache or not". It's <em>what's stable enough to cache, and what cache pattern fits each thing.</em>
+  </div>
+
+  <h2>What's worth indexing, by volatility</h2>
+  <table>
+    <thead>
+      <tr><th>Data</th><th>Volatility</th><th>Strategy</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Airport / city geography, train links</td><td>Years</td><td>Static asset</td><td>Already in <code>enums/airports.csv</code>; extend with rail-station codes.</td></tr>
+      <tr><td>Airline fees / fare rules</td><td>Weeks&ndash;months</td><td>Weekly LLM-extract worker</td><td>See <a href="cost-transparency.html">Cost Transparency</a>.</td></tr>
+      <tr><td>Route existence ("does AA fly JFK&rarr;ATH?")</td><td>Monthly</td><td>Scrape Wikipedia route maps + carrier site indexes monthly</td><td>Cuts search fan-out &mdash; skip provider calls for non-routes.</td></tr>
+      <tr><td>Schedules (departure times, frequency)</td><td>Weekly</td><td>Cache 7&ndash;30d; OAG/Cirium if you can afford it</td><td>Powers "morning flights only?" without a live call.</td></tr>
+      <tr><td><strong>Live prices</strong></td><td><strong>Minutes</strong></td><td><strong>Short TTL (5&ndash;15 min) + stale-while-revalidate</strong></td><td>Don't try to be authoritative; be fast.</td></tr>
+      <tr><td><strong>Historical prices</strong></td><td>Append-only</td><td><strong>Log every query result</strong></td><td>The moat. See below.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Cache layer architecture</h2>
+  <div class="diagram">                                          &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+                                          &#9474; Cache layer (Redis)         &#9474;
+                                          &#9474;   search_result_cache 10min  &#9474;
+       Orchestrator &#8594; (read-through) &rarr; &#9474;   negative_cache 6h          &#9474;
+                                          &#9474;   schedule_cache 24h&ndash;7d      &#9474;
+                                          &#9474;   isochrone_cache (months)    &#9474;
+                                          &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                                                       &#9474;
+                                          &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+                                          &#9474; Postgres                    &#9474;
+       Every result observed &rarr;          &#9474;   price_observations  &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9474;&#9472;&#9472;&rarr; "deal score" model
+                                          &#9474;   route_index           &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9474;&#9472;&#9472;&rarr; carrier coverage map
+                                          &#9474;   airline_fee_profile        &#9474;
+                                          &#9474;   city_groups                 &#9474;
+                                          &#9474;   protected_intermodal        &#9474;
+                                          &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
+
+  <h2>1. Query-result cache</h2>
+  <p><strong>Table stakes.</strong> Redis, keyed by a normalized hash of <code>SearchRequest</code>.</p>
+  <pre><code>key = sha256(
+    canonical_json(SearchRequest.normalize())  # drop None, sort sets
+)
+ttl_browse   = 10 * 60     # 10 min for general browsing
+ttl_select   =  1 * 60     # 1 min once user has selected (or skip cache)</code></pre>
+  <p><strong>Stale-while-revalidate:</strong> on a hit older than 50% of TTL, return the cached value <em>and</em> kick off a background refresh. Push updated results via SSE when they arrive. Net effect: repeat-query latency drops from ~5s to ~50ms; provider load drops 70&ndash;90% on popular routes.</p>
+
+  <h2>2. Price-history database (the moat)</h2>
+  <p>Every search result that returns to a user is also written, append-only, to <code>price_observations</code>. Grows passively with traffic; no extra scraping budget required.</p>
+  <pre><code>price_observations (
+    id              bigserial primary key,
+    observed_at     timestamptz not null,
+    origin          char(3) not null,        -- IATA
+    destination     char(3) not null,
+    depart_date     date not null,
+    return_date     date,
+    cabin           cabin_enum not null,
+    carrier         char(2),                 -- marketing carrier
+    stops           smallint,
+    price_usd       numeric(10,2) not null,
+    fare_brand      text,                    -- null when provider doesn't supply
+    provider        text not null,
+    journey_hash    bytea                    -- dedupe within a session
+);
+create index on price_observations (origin, destination, depart_date);
+create index on price_observations (observed_at);</code></pre>
+
+  <h3>What it unlocks</h3>
+  <ul>
+    <li><strong>Deal score:</strong> "$412 LAX&rarr;NRT for late June is in the cheapest 18% historically." Hopper-style, but computed from your own data.</li>
+    <li><strong>Cheapest-week widgets</strong> without re-querying live for a date matrix.</li>
+    <li><strong>Price-drop alerts</strong> &mdash; subscribe a user to a (route, date-window) and notify when current prices fall below the historical median.</li>
+    <li><strong>"Wait or book"</strong> predictions once you have ~6 months of data on a route.</li>
+    <li><strong>Pruning input:</strong> the orchestrator uses historical floors to skip provider calls for candidate pairs that can't beat the current best total.</li>
+  </ul>
+
+  <div class="callout">
+    <span class="label">Cold start</span>
+    Seed by running a nightly scrape of the top 200 routes for ~90 days, then let organic traffic take over. ~2&ndash;3 months in, the model becomes meaningful.
+  </div>
+
+  <h2>3. Negative cache</h2>
+  <p>"No flights JFK&rarr;LCY direct" is a common, slow-to-prove result. Cache the absence too.</p>
+  <pre><code>negative_cache (
+    request_hash    bytea primary key,
+    expires_at      timestamptz not null
+)
+default ttl = 6 hours for "no service today"
+default ttl = 30 days   for "carrier doesn't serve this pair"</code></pre>
+  <p>Big win for intermodal fan-out: many candidate (city &rarr; airport &rarr; destination) tuples have no service at all, and skipping them with one DB lookup keeps the search budget intact.</p>
+
+  <h2>4. Route index</h2>
+  <p>"Does carrier X serve route Y at all, currently?" Powers fan-out pruning.</p>
+  <pre><code>route_index (
+    origin       char(3) not null,
+    destination  char(3) not null,
+    carrier      char(2) not null,
+    nonstop      bool not null,
+    days_of_week smallint,           -- bitmask
+    season_start date, season_end date,
+    last_seen_at timestamptz not null,
+    primary key (origin, destination, carrier)
+)</code></pre>
+  <p>Refreshed monthly from a combination of: results observed in <code>price_observations</code> (organic), Wikipedia airline route maps (curated), and carrier site indexes (best-effort).</p>
+
+  <h2>5. Schedule index</h2>
+  <p>Nightly job records <em>which flights exist</em> for the top N routes (no prices, no fan-out). Lets the UI render skeleton results instantly while live prices fetch:</p>
+  <pre><code>&#9484;&#9472; Delta DL47, nonstop, departs 11:35 &#8722; &#8722; &#8722;&#8202;checking price&#8230;
+&#9474;
+&#9474; United UA1872, 1 stop ATL, departs 14:10 &mdash; $612 (live)
+&#9492;</code></pre>
+
+  <h2>6. Isochrone cache (ground transit)</h2>
+  <p>Pre-computed "ground area reachable from each airport within T hours" stored as PostGIS polygons. Refreshed quarterly. See <a href="ground-transit.html">Ground Transit</a> for the details.</p>
+
+  <h2>What about scraping airline sites directly?</h2>
+  <div class="callout warn">
+    <span class="label">Don't (yet)</span>
+    Direct airline scraping is tempting but the wrong v1 trade.
+  </div>
+  <ul>
+    <li><strong>Anti-bot is industrial:</strong> most major airlines run Akamai Bot Manager, PerimeterX, or DataDome. Headless browser + residential proxies <em>might</em> work and breaks weekly.</li>
+    <li><strong>Maintenance burden:</strong> each airline is a bespoke scraper. ~20 carriers = 20 things that break independently.</li>
+    <li><strong>Legal exposure:</strong> Ryanair in particular has sued scrapers in EU courts and won some judgments. US case law (hiQ v LinkedIn) is friendlier but the postures are aggressive.</li>
+    <li><strong>What you'd gain</strong> over fast-flights is fare brand and accurate ancillaries &mdash; both available through Duffel (~free at low volumes) when the time comes.</li>
+  </ul>
+  <p>The fee-page LLM extractor (see <a href="cost-transparency.html">Cost</a>) gets you ancillary data without touching the booking flows.</p>
+
+  <h2>v1 caching plan in one paragraph</h2>
+  <p>Don't pre-index prices. Run live + 10-min TTL Redis cache with stale-while-revalidate. Log every result to <code>price_observations</code> from day one. Maintain a route-index and schedule-cache via a nightly job over the top routes. Maintain a negative cache for "no service" results. Defer airline scraping indefinitely. Revisit at ~1k DAU: by then the price-history database is meaningful and the next set of decisions (predictive deal scores, seeded scrapes at scale) can be made with data.</p>
+
+  <div class="pager">
+    <a href="data-and-providers.html"><span class="label">Previous</span>Data &amp; Providers</a>
+    <a href="nlu-and-llms.html" class="next"><span class="label">Next</span>NLU &amp; LLMs</a>
+  </div>
+</main>
+</body>
+</html>
